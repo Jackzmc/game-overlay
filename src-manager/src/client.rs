@@ -5,7 +5,6 @@ use tokio::sync::mpsc::UnboundedSender;
 use uuid::Uuid;
 use warp::ws::Message;
 use crate::manager::{RequestError, Server};
-use crate::server::ServerOutgoingEvent;
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 /// Messages that are being sent to client (Client <- Manager)
