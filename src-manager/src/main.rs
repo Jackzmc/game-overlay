@@ -4,7 +4,10 @@ mod manager;
 
 // #![deny(warnings)]
 use std::collections::HashMap;
+use std::{env, fs};
+use std::io::ErrorKind;
 use std::net::SocketAddr;
+use std::ops::Deref;
 use std::sync::{
     atomic::{AtomicUsize, Ordering},
     Arc,
@@ -12,10 +15,11 @@ use std::sync::{
 use std::time::Duration;
 
 use futures_util::{SinkExt, StreamExt, TryFutureExt, TryStreamExt};
+use handlebars::Handlebars;
 use tokio::sync::{mpsc, RwLock};
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use warp::ws::{Message, WebSocket};
-use warp::{Filter, method, Reply, reply};
+use warp::{Filter, method, reject, Rejection, Reply, reply};
 use log::{debug, error, info, warn};
 use serde_json::{json, Value};
 use steamid_ng::SteamID;
@@ -26,27 +30,39 @@ use warp::filters::method;
 use crate::client::ClientOutgoingEvent;
 use crate::manager::{AuthFailure, Client, Manager, Server};
 use crate::server::{ServerIncomingRequest, ServerOutgoingEvent};
+use once_cell::sync::Lazy;
+use warp::http::StatusCode;
 
 type QueryMap = HashMap<String, String>;
 static CLIENT_AUTH_TIMEOUT: Duration = Duration::from_secs(60 * 4);
+static LISTEN_ADDRESS: Lazy<SocketAddr> = Lazy::new(|| std::env::var("LISTEN_HOST").unwrap_or_else(|_| "127.0.0.1:3011".to_string())
+    .parse().expect("bad LISTEN_HOST"));
+static PUBLIC_URL: Lazy<String> = Lazy::new(|| std::env::var("PUBLIC_URL").unwrap_or_else(|_| "http://localhost:3011".to_string()) );
 
 
+#[derive(Debug)]
+struct MissingQueryParameter(String);
+
+impl reject::Reject for MissingQueryParameter {}
 #[tokio::main]
 async fn main() {
     if std::env::var("RUST_LOG").is_err() {
         std::env::set_var("RUST_LOG", "info");
     }
-
     pretty_env_logger::init();
-    let manager_inst = Manager::default();
 
+    let manager_inst = Manager::default();
     let manager = warp::any().map(move || manager_inst.clone());
 
-    // GET /chat -> websocket upgrade
+    let mut hb = Handlebars::new();
+    load_templates(&mut hb);
+    let hb = Arc::new(hb);
+    let handlebars = move |with_template| render(with_template, hb.clone());
+
     let socket = warp::path("socket")
         // The `ws()` filter will prepare Websocket handshake...
         .and(warp::ws())
-        .and(manager)
+        .and(manager.clone())
         .and(remote())
         .map(|ws: warp::ws::Ws, manager: Manager, addr: Option<SocketAddr>| -> Box<dyn warp::Reply> {
             if let Some(addr) = addr {
@@ -59,21 +75,31 @@ async fn main() {
             }
         });
 
-    // GET / -> index html
-    // let login = warp::path!("auth"/"login")
-    //     .and(warp::query::<QueryMap>())
-    //     .and(manager)
-    //     .and(remote())
-    //     .and_then(|manager: Manager, addr: Option<SocketAddr>, query: QueryMap| async move {
-    //         let id = query.get("id");
-    //         match query.get("id") {
-    //             Some(id) => {
-                // TODO: need html form that then has user submit POST
-    //                 // warp::reply::with_status(warp::reply::with_header("Location", ""))
-    //             },
-    //             None => Err(warp::reject::not_found())
-    //         }
-    //     });
+    let login = warp::path!("auth"/"login")
+        .and(warp::query::<QueryMap>())
+        .and(manager.clone())
+        .and(remote())
+        .and_then(|query: QueryMap, manager: Manager, addr: Option<SocketAddr>| async move  {
+            if let Some(id) = query.get("id") {
+                if manager.lock().await.verify_client(id, &addr.unwrap()).await {
+                    Ok(id.to_string())
+                } else {
+                    Err(reject::not_found())
+                }
+            } else {
+                Err(reject::custom(MissingQueryParameter("id".to_string())))
+            }
+        })
+        .map(|id: String| WithTemplate {
+            name: "login",
+            value: json!({
+                "host": PUBLIC_URL.deref(),
+                "id": id
+            }),
+        })
+        .map(handlebars)
+        .recover(handle_rejection);
+
     // let callback = warp::path!("auth" / "callback")
     //     .and(method::post())
     //     .and(warp::query::<HashMap<String, String>>())
@@ -83,11 +109,81 @@ async fn main() {
     //
     //     });
 
-    let routes = socket; //.or(login).or(callback);
+    let routes = socket.or(login);//.or(callback);
 
-    let host: SocketAddr = std::env::var("HOSTNAME").unwrap_or_else(|_| "127.0.0.1:3011".to_string())
-        .parse().expect("bad HOSTNAME");
-    warp::serve(routes).run(host).await;
+    warp::serve(routes).run(*LISTEN_ADDRESS).await;
+}
+
+#[derive(Serialize)]
+struct ErrorResponse {
+    error: String,
+    message: Option<String>
+}
+async fn handle_rejection(err: Rejection) -> Result<impl Reply, std::convert::Infallible> {
+    let code;
+    let response: ErrorResponse;
+
+    if err.is_not_found() {
+        code = StatusCode::NOT_FOUND;
+        response = ErrorResponse {
+            error: "NOT_FOUND".to_string(),
+            message: Some("Resource not found".to_string())
+        }
+    } else if let Some(MissingQueryParameter(param)) = err.find() {
+        code = StatusCode::BAD_REQUEST;
+        response = ErrorResponse {
+            error: "QUERY_PARAMETER_REQUIRED".to_string(),
+            message: Some(format!("{param} is a required query parameter"))
+        }
+    }  else {
+        // We should have expected this... Just log and say its a 500
+        eprintln!("unhandled rejection: {:?}", err);
+        code = StatusCode::INTERNAL_SERVER_ERROR;
+        response = ErrorResponse {
+            error: "UNHANDLED_REJECTION".to_string(),
+            message: None
+        };
+    }
+
+    let json = warp::reply::json(&response);
+    Ok(warp::reply::with_status(json, code))
+}
+
+struct WithTemplate<T: Serialize> {
+    name: &'static str,
+    value: T,
+}
+
+fn render<T>(template: WithTemplate<T>, hbs: Arc<Handlebars<'_>>) -> impl warp::Reply
+    where
+        T: Serialize,
+{
+    let render = hbs
+        .render(template.name, &template.value)
+        .unwrap_or_else(|err| err.to_string());
+    warp::reply::html(render)
+}
+fn load_templates(hb: &mut Handlebars) {
+    match fs::read_dir(env::current_dir().unwrap().join("templates")) {
+        Ok(files) => {
+            for entry in files {
+                let entry = entry.unwrap();
+                if entry.file_type().unwrap().is_file() {
+                    let path = entry.path();
+                    let name = path.file_stem().unwrap().to_str().unwrap();
+                    debug!("registering template \"{}\"", name);
+                    hb.register_template_file(name, &path).unwrap()
+                }
+            }
+        },
+        Err(e) => {
+            if e.kind() == ErrorKind::NotFound {
+                warn!("No templates folder found, no templates will be loaded. ({})", e);
+            } else {
+                panic!("load_templates: {}", e);
+            }
+        }
+    }
 }
 
 #[derive(Deserialize)]
@@ -121,8 +217,7 @@ async fn init_connection(mut ws: WebSocket, addr: SocketAddr, manager: Manager) 
                 },
                 Err(err) => {
                     warn!("invalid payload: {}", err);
-                    let json = serde_json::to_string(&InitConnectionResPayload::InvalidPayload { message: None }).unwrap();
-                    ws.send(Message::text(json)).await.ok();
+                    send(&mut ws, InitConnectionResPayload::InvalidPayload { message: Some(err.to_string()) }).await;
                     ws.close().await.unwrap();
                 }
             }
@@ -142,8 +237,7 @@ async fn login_connection(mut ws: WebSocket, manager: Manager, req: InitConnecti
             match mngr.start_temp_client(addr, tx.clone()) {
                 Ok(client) => {
                     let id = client.lock().await.id();
-                    let host = std::env::var("PUBLIC_URL").unwrap_or_else(|_| "localhost:3011".to_string());
-                    send(&mut ws, InitConnectionResPayload::PendingClientLogin { url: format!("{host}/auth/login?id={id}") }).await;
+                    send(&mut ws, InitConnectionResPayload::PendingClientLogin { url: format!("{}/auth/login?id={id}", PUBLIC_URL.deref()) }).await;
                     drop(mngr);
                     init_client_connection(ws, manager, client).await;
                 },

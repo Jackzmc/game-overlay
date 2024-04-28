@@ -3,6 +3,7 @@ use std::error::Error;
 use std::fmt;
 use std::net::SocketAddr;
 use std::sync::Arc;
+use log::debug;
 use tokio::sync::Mutex;
 use serde::Serialize;
 use steamid_ng::SteamID;
@@ -60,6 +61,7 @@ impl ManagerInstance {
         let id = ClientInstance::next_id();
         let client = ClientInstance::with_id(addr, tx, id.clone());
         let client = Arc::new(Mutex::new(client));
+        debug!("start_temp_client: at addr {addr:?}, id={id}");
         self.clients.insert(id, client.clone());
         Ok(client)
     }
@@ -79,7 +81,22 @@ impl ManagerInstance {
     pub fn get_client(&self, id: &str) -> Option<Client> {
         self.clients.get(id).cloned()
     }
-
+    pub fn has_client(&self, id: &str) -> bool {
+        self.clients.contains_key(id)
+    }
+    /// Verifies that the client ID exists and the IP matches (ignoring port)
+    pub async fn verify_client(&self, id: &str, addr: &SocketAddr) -> bool {
+        debug!("verify_client: checking {id} at {addr:?}");
+        match self.get_client(id) {
+            Some(client) => {
+                debug!("verify_client: got client, fetching & validating ip");
+                let client = client.lock().await;
+                debug!("stored={} incoming={addr}", client.addr());
+                client.addr().ip() == addr.ip()
+            },
+            None => false
+        }
+    }
     pub fn find_client_by_steamid(&self, steamid: SteamID) -> Option<Client> {
         self.client_steamid_map.get(&steamid).and_then(|id| self.get_client(id))
     }

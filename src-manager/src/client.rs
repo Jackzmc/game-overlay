@@ -43,6 +43,7 @@ impl ClientInstance {
     pub fn id(&self) -> String { self.id.to_string() }
     pub fn steamid(&self) -> Option<SteamID> { self.steamid.as_ref().map(|s| s.clone()) }
     pub fn steamid2(&self) -> Option<String> { self.steamid.map(|s| s.steam2()) }
+    pub fn addr(&self) -> &SocketAddr { &self.addr }
     pub fn connected_server(&self) -> Option<Server> {
         self.server.as_ref().map(|s| s.clone())
     }
