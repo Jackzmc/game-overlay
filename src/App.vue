@@ -26,9 +26,10 @@ setInterval(() => {
   time.value = d.toLocaleTimeString()
 }, 1000)
 
-setInterval(async () => {
-  proc.value = await invoke("check_process")
-}, 500)
+// setInterval(async () => {
+//   proc.value = await invoke("check_process")
+// }, 500)
+invoke("init_process_check")
 
 onMounted(async() => {
   await listen("manager", ({ payload }) => {
@@ -36,6 +37,9 @@ onMounted(async() => {
 
     }
     console.debug("manager", payload)
+  })
+  await listen("process", ({payload}) => {
+    proc.value = payload
   })
   invoke("init_manager")
   await register('Control+Shift+G', async() => {

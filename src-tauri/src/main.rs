@@ -7,27 +7,20 @@ mod manager;
 
 use sysinfo::{Pid, ProcessStatus, System};
 use tauri::{AppHandle, Manager, PhysicalPosition, Position, Size, State, Url, Window};
-use std::sync::Mutex;
-use windows::{
-    Win32::UI::WindowsAndMessaging::{
-        GetForegroundWindow, GetWindowModuleFileNameW, GetWindowThreadProcessId,
-    },
-    Win32::System::ProcessStatus::{
-        GetModuleFileNameExW
-    },
-    Win32::System::Threading::{
-        OpenProcess, PROCESS_QUERY_INFORMATION
-    }
-};
-use windows::Win32::Foundation::{HANDLE, HMODULE};
-use windows::Win32::System::ProcessStatus::GetModuleBaseNameW;
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
+use active_win_pos_rs::get_active_window;
 use tungstenite::{connect, Message};
 use crate::manager::ManagerResponse;
 
 
+#[cfg(windows)]
 const TARGET_PROC_NAME: &str = "left4dead2.exe";
-// const TARGET_PROC_NAME: &str = "WinSCP.exe";
+#[cfg(unix)]
+// const TARGET_PROC_NAME: &str = "left4dead2";
+const TARGET_PROC_NAME: &str = "thunderbird";
 const MANAGER_WS_URL: &str = "ws://localhost:3012/socket";
+const PROCESS_CHECK_INTERVAL: u64 = 1000 * 2;
 
 #[derive(PartialEq, serde::Serialize, Clone, Debug)]
 enum ViewState {
@@ -72,12 +65,12 @@ fn main() {
             Ok(())
         })
         .manage(data)
-        .invoke_handler(tauri::generate_handler![check_process, init_manager, init_login, overlay_key])
+        .invoke_handler(tauri::generate_handler![check_process, init_manager, init_login, overlay_key, init_process_check])
         .run(context)
         .expect("error while running tauri application");
 }
 
-#[derive(serde::Serialize)]
+#[derive(serde::Serialize, Clone)]
 struct ProcessDataResult {
     pid: u32,
     cpu_usage: f32,
@@ -88,18 +81,67 @@ struct ProcessDataResult {
 enum ProcessData {
     Result(ProcessDataResult),
 }
+
+#[tauri::command]
+fn init_process_check(window: tauri::Window) {
+    std::thread::spawn(move || {
+        loop {
+            let state = window.state::<Mutex<AppData>>();
+            let mut data = state.lock().unwrap();
+            data.sys.refresh_processes();
+            // let active_pid = get_active_window_pid();
+            let active_window = get_active_window().unwrap();
+            let our_pid = std::process::id() as u64;
+            let mut active = data.view_state == ViewState::Visible;
+            // println!("active={} target={}", active_window.app_name, TARGET_PROC_NAME);
+            if let Some(proc) = data.sys.processes_by_name(TARGET_PROC_NAME).next() {
+                let pid = proc.pid().as_u32();
+                // println!("proc found. pid={} active_pid={}", pid, active_window.process_id);
+                if active_window.process_id == our_pid || active_window.process_id == pid as u64 || active_window.app_name == TARGET_PROC_NAME {
+                    window.emit("process", ProcessDataResult {
+                        pid,
+                        cpu_usage: proc.cpu_usage(),
+                        start_time: proc.start_time(),
+                        mem_usage: proc.memory(),
+                        status: proc.status().to_string(),
+                    }).unwrap();
+                    active = true;
+                } else {
+                    active = false;
+                }
+            } else {
+                // Fallback incase we can detect active window but can't find it's name (unix differences). Won't have payload data.
+                active = active_window.app_name == TARGET_PROC_NAME;
+            }
+
+            if data.view_state != ViewState::Interactable {
+                if data.view_state == ViewState::Visible && !active {
+                    data.view_state = ViewState::Hidden;
+                    // window.hide().unwrap();
+                    window.close().unwrap();
+                } else if data.view_state == ViewState::Hidden && active {
+                    data.view_state = ViewState::Visible;
+                    window.show().unwrap();
+                }
+            }
+            std::thread::sleep(Duration::from_millis(PROCESS_CHECK_INTERVAL));
+        }
+    });
+}
 #[tauri::command]
 fn check_process(app: tauri::AppHandle, data: State<Mutex<AppData>>) -> Option<ProcessDataResult> {
     let mut data = data.lock().unwrap();
     data.sys.refresh_processes();
     let window = app.get_window("main").unwrap();
-    let active_pid = get_active_window_pid();
-    let our_pid = std::process::id();
+    // let active_pid = get_active_window_pid();
+    let active_window = get_active_window().unwrap();
+    println!("active = {:?}", active_window);
+    let our_pid = std::process::id() as u64;
     let mut active = data.view_state == ViewState::Visible;
     let mut result: Option<ProcessDataResult> = None;
     if let Some(proc) = data.sys.processes_by_exact_name(TARGET_PROC_NAME).next() {
         let pid = proc.pid().as_u32();
-        if active_pid == our_pid || active_pid == pid {
+        if active_window.process_id == our_pid || active_window.process_id == pid as u64{
             result = Some(ProcessDataResult {
                 pid: proc.pid().as_u32(),
                 cpu_usage: proc.cpu_usage(),
@@ -124,7 +166,6 @@ fn check_process(app: tauri::AppHandle, data: State<Mutex<AppData>>) -> Option<P
             window.show().unwrap();
         }
     }
-    println!("view_state={:?} active={}", data.view_state, active);
     result
 }
 
@@ -174,7 +215,9 @@ fn init_manager(window: Window) {
     });
 }
 
+#[cfg(windows)]
 fn get_active_window_pid() -> u32 {
+
     unsafe {
         let hwnd = GetForegroundWindow();
 
@@ -183,22 +226,22 @@ fn get_active_window_pid() -> u32 {
         pid
     }
 }
-fn get_active_window() -> (u32, String) {
-    unsafe {
-       let pid = get_active_window_pid();
-
-        let proc = OpenProcess(
-            PROCESS_QUERY_INFORMATION,
-            false,
-            pid
-        ).expect("could not open");
-
-
-        let mut bytes: [u16; 500] = [0; 500];
-        let len = GetModuleBaseNameW(proc, HMODULE(0), &mut bytes);
-        // let len = windows::Win32::System::ProcessStatus::GetProcessImageFileNameW(proc, &mut bytes);
-        let exe = String::from_utf16_lossy(&bytes[..len as usize]);
-
-        (pid, exe)
-    }
-}
+// fn get_active_window() -> (u32, String) {
+//     unsafe {
+//        let pid = get_active_window_pid();
+//
+//         let proc = OpenProcess(
+//             PROCESS_QUERY_INFORMATION,
+//             false,
+//             pid
+//         ).expect("could not open");
+//
+//
+//         let mut bytes: [u16; 500] = [0; 500];
+//         let len = GetModuleBaseNameW(proc, HMODULE(0), &mut bytes);
+//         // let len = windows::Win32::System::ProcessStatus::GetProcessImageFileNameW(proc, &mut bytes);
+//         let exe = String::from_utf16_lossy(&bytes[..len as usize]);
+//
+//         (pid, exe)
+//     }
+// }
