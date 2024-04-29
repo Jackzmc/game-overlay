@@ -1,9 +1,13 @@
 use std::net::SocketAddr;
+use std::time::{SystemTime, UNIX_EPOCH};
+use jwt::SignWithKey;
 use serde::{Deserialize, Serialize};
+use sha2::digest::KeyInit;
 use steamid_ng::SteamID;
 use tokio::sync::mpsc::UnboundedSender;
 use uuid::Uuid;
 use warp::ws::Message;
+use crate::JWT_SECRET_KEY;
 use crate::manager::{RequestError, Server};
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -11,7 +15,9 @@ use crate::manager::{RequestError, Server};
 pub enum ClientIncomingRequest {
     ClientJoined,
     ClientDisconnected,
-    GameData {} // TODO: implement
+    GameData {}, // TODO: implement
+
+    Authorized { steamid2: String, auth_token: String }
 }
 #[derive(Serialize, Deserialize, Debug, Clone)]
 /// Messages that are being received from the client (Client -> Manager)
@@ -60,9 +66,22 @@ impl ClientInstance {
         self.tx.send(Message::text(json)).map_err(|_| ()).map_err(|_| RequestError::Disconnected)
     }
 
-    // pub fn connect_to(&mut self, server: &mut Server) {
-    //     // server.add_client(self.)
-    // }
+    pub fn generate_auth_token(&self) -> Result<String, String> {
+        if !self.steamid.is_none() {
+            return Err("Client is not authorized/missing steamid".to_string())
+        }
+        let mut claims = std::collections::BTreeMap::new();
+        claims.insert("sub", self.steamid.unwrap().steam2());
+        claims.insert("iss", "manager".to_string());
+        claims.insert("iat", SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs().to_string());
+        claims.insert("jti", self.id.to_string());
+        claims.insert("ip", self.addr.to_string());
+        let raw = std::env::var("JWT_SECRET").expect("missing JWT_SECRET env");
+        let key: hmac::Hmac<sha2::Sha256> = hmac::Hmac::new_from_slice(raw.as_bytes()).expect("could not generate Hmac<Sha256> from JWT_SECRET");
+        claims.sign_with_key(&key).map_err(|e| {
+            e.to_string()
+        })
+    }
 
     pub fn _set_steamid(&mut self, steamid: SteamID) {
         self.steamid = Some(steamid);

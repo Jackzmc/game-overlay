@@ -57,6 +57,15 @@ impl ManagerInstance {
         Self::default()
     }
 
+    /// Loads stored
+    pub async fn load(&mut self) {
+
+    }
+
+    pub async fn save(&self) {
+
+    }
+
     pub fn start_temp_client(&mut self, addr: SocketAddr, tx: UnboundedSender<Message>) -> Result<Client, AuthFailure> {
         let id = ClientInstance::next_id();
         let client = ClientInstance::with_id(addr, tx, id.clone());

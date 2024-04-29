@@ -1,25 +1,26 @@
 mod client;
 mod server;
 mod manager;
+mod util;
+mod steam;
 
 // #![deny(warnings)]
 use std::collections::HashMap;
 use std::{env, fs};
+use std::cell::OnceCell;
+use std::future::Future;
 use std::io::ErrorKind;
 use std::net::SocketAddr;
 use std::ops::Deref;
-use std::sync::{
-    atomic::{AtomicUsize, Ordering},
-    Arc,
-};
+use std::sync::{atomic::{AtomicUsize, Ordering}, Arc, OnceLock};
 use std::time::Duration;
-
+use axum::ServiceExt;
 use futures_util::{SinkExt, StreamExt, TryFutureExt, TryStreamExt};
 use handlebars::Handlebars;
 use tokio::sync::{mpsc, RwLock};
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use warp::ws::{Message, WebSocket};
-use warp::{Filter, method, reject, Rejection, Reply, reply};
+use warp::{Filter, hyper, method, reject, Rejection, Reply, reply};
 use log::{debug, error, info, warn};
 use serde_json::{json, Value};
 use steamid_ng::SteamID;
@@ -27,24 +28,42 @@ use uuid::Uuid;
 use warp::addr::remote;
 use serde::{Serialize,Deserialize};
 use warp::filters::method;
-use crate::client::ClientOutgoingEvent;
+use crate::client::{ClientIncomingRequest, ClientOutgoingEvent};
 use crate::manager::{AuthFailure, Client, Manager, Server};
 use crate::server::{ServerIncomingRequest, ServerOutgoingEvent};
 use once_cell::sync::Lazy;
+use reqwest::{Error, Response};
+use sha2::digest::KeyInit;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use warp::http::StatusCode;
+use crate::steam::{OpenIDPayload, SteamClient, SteamUser};
 
 type QueryMap = HashMap<String, String>;
 static CLIENT_AUTH_TIMEOUT: Duration = Duration::from_secs(60 * 4);
 static LISTEN_ADDRESS: Lazy<SocketAddr> = Lazy::new(|| std::env::var("LISTEN_HOST").unwrap_or_else(|_| "127.0.0.1:3011".to_string())
     .parse().expect("bad LISTEN_HOST"));
 static PUBLIC_URL: Lazy<String> = Lazy::new(|| std::env::var("PUBLIC_URL").unwrap_or_else(|_| "http://localhost:3011".to_string()) );
+static APP_USER_AGENT: &str = concat!(
+    env!("CARGO_PKG_NAME"),
+    "/",
+    env!("CARGO_PKG_VERSION"),
+);
+static JWT_SECRET_KEY: Lazy<hmac::Hmac<sha2::Sha256>> = Lazy::new(|| {
+    let raw = std::env::var("JWT_SECRET").expect("missing JWT_SECRET env");
+    hmac::Hmac::new_from_slice(raw.as_bytes()).expect("could not generate Hmac<Sha256> from JWT_SECRET")
+});
 
 
 #[derive(Debug)]
 struct MissingQueryParameter(String);
+#[derive(Debug, Serialize)]
+struct SteamAuthError(String);
+
 
 impl reject::Reject for MissingQueryParameter {}
+impl reject::Reject for SteamAuthError {}
+impl reject::Reject for ErrorResponse {}
+
 #[tokio::main]
 async fn main() {
     if std::env::var("RUST_LOG").is_err() {
@@ -54,6 +73,12 @@ async fn main() {
 
     let manager_inst = Manager::default();
     let manager = warp::any().map(move || manager_inst.clone());
+
+
+    let client = get_client();
+    let steam = SteamClient::new(client.clone(), std::env::var("STEAM_APIKEY").expect("missing STEAM_APIKEY"));
+    let client = warp::any().map(move || client.clone());
+    let steam = warp::any().map(move || steam.clone());
 
     let mut hb = Handlebars::new();
     load_templates(&mut hb);
@@ -101,21 +126,66 @@ async fn main() {
         .map(handlebars)
         .recover(handle_rejection);
 
-    // let callback = warp::path!("auth" / "callback")
-    //     .and(method::post())
-    //     .and(warp::query::<HashMap<String, String>>())
-    //     .and(manager)
-    //     .and(remote())
-    //     .map(|manager: Manager, addr: Option<SocketAddr>| {
-    //
-    //     });
+
+    let callback = warp::path!("auth" / "callback")
+        .and(method::post())
+        .and(warp::query::<OpenIdCallback>())
+        .and(steam)
+        .and(manager)
+        .and(client)
+        .and(remote())
+        .and_then(|mut query: OpenIdCallback, mut steam: SteamClient, manager: Manager, client: reqwest::Client, addr: Option<SocketAddr>| async move {
+            let steamid = SteamID::from_steam2(&query.openid.identity).expect("openid identity is bad");
+            steam.verify_openid(&mut query.openid).await?;
+            let user = steam.get_user_details(SteamID::from_steam2(&query.openid.identity).unwrap()).await
+                .map_err(|e| reject::custom(SteamAuthError(e.to_string())))?;
+            let manager = manager.lock().await;
+            let client = manager.get_client(&query.id).ok_or_else(|| reject::custom(ErrorResponse {
+                error: "SESSION_EXPIRED".to_string(),
+                message: Some("Client ID is no longer valid, session has expired.".to_string()),
+            }))?;
+            let mut client = client.lock().await;
+            client._set_steamid(steamid.clone());
+            let token = client.generate_auth_token().expect("client not authorized");
+            client.send_request(&ClientIncomingRequest::Authorized {
+                steamid2: steamid.steam2(),
+                auth_token: token,
+            }).unwrap();
+            Ok::<(), Rejection>(())
+                    // return Box::new(reply::with_status(reply::json(&ErrorResponse {
+                    //     error: "AUTH_TOKEN_GENERATION_FAILED".to_string(),
+                    //     message: Some(err.to_string()),
+                    // }), StatusCode::INTERNAL_SERVER_ERROR));
+                // None => {
+                //     return Box::new(reply::with_status(reply::json(&ErrorResponse {
+                //         error: "SESSION_EXPIRED".to_string(),
+                //         message: Some("Client ID is no longer valid, session has expired.".to_string()),
+                //     }), StatusCode::BAD_REQUEST))
+                // }
+        })
+        .recover(handle_rejection);
 
     let routes = socket.or(login);//.or(callback);
 
     warp::serve(routes).run(*LISTEN_ADDRESS).await;
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
+struct OpenIdCallback {
+    id: String,
+
+    #[serde(flatten)]
+    openid: OpenIDPayload
+}
+
+fn get_client() -> reqwest::Client {
+    reqwest::Client::builder()
+        .user_agent(APP_USER_AGENT)
+        .build()
+        .expect("could not create HTTP client")
+}
+
+#[derive(Serialize, Debug)]
 struct ErrorResponse {
     error: String,
     message: Option<String>
@@ -191,7 +261,7 @@ fn load_templates(hb: &mut Handlebars) {
 #[serde(rename_all = "snake_case")]
 #[serde(tag = "type")]
 enum InitConnectionReqPayload {
-    Client {},
+    Client { auth_token: Option<String> },
     Server { auth_token: String }
 }
 
@@ -238,17 +308,21 @@ async fn login_connection(mut ws: WebSocket, manager: Manager, req: InitConnecti
     let mut mngr = manager.lock().await;
 
     match req {
-        InitConnectionReqPayload::Client { } => {
+        InitConnectionReqPayload::Client { auth_token} => {
             debug!("login_connection - starting temp client");
-            match mngr.start_temp_client(addr, tx.clone()) {
-                Ok(client) => {
-                    let id = client.lock().await.id();
-                    send(&mut ws, InitConnectionResPayload::PendingClientLogin { url: format!("{}/auth/login?id={id}", PUBLIC_URL.deref()) }).await;
-                    drop(mngr);
-                    init_client_connection(ws, (tx,rx), manager, client).await;
-                },
-                Err(e) => {
-                    send(&mut ws, InitConnectionResPayload::AuthFailure(e)).await;
+            if let Some(auth_token) = auth_token {
+                // TODO: implement
+            } else {
+                match mngr.start_temp_client(addr, tx.clone()) {
+                    Ok(client) => {
+                        let id = client.lock().await.id();
+                        send(&mut ws, InitConnectionResPayload::PendingClientLogin { url: format!("{}/auth/login?id={id}", PUBLIC_URL.deref()) }).await;
+                        drop(mngr);
+                        init_client_connection(ws, (tx, rx), manager, client).await;
+                    },
+                    Err(e) => {
+                        send(&mut ws, InitConnectionResPayload::AuthFailure(e)).await;
+                    }
                 }
             }
         }
