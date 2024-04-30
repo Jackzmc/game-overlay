@@ -1,17 +1,19 @@
 use std::net::TcpStream;
-use tauri::Url;
+use std::sync::{Arc, Mutex};
+use std::thread::sleep;
+use std::time::Duration;
+use tauri::{Manager, Url, Window};
 use tungstenite::stream::MaybeTlsStream;
 use tungstenite::{connect, WebSocket};
-use crate::MANAGER_WS_URL;
+use crate::{MANAGER_WS_URL, OverlayManager};
 
-pub struct Manager {
+pub struct OverlayManagerInstance {
     url: Url,
     socket: Option<WebSocket<MaybeTlsStream<TcpStream>>>
 }
 
-impl Manager {
+impl OverlayManagerInstance {
     pub fn new(url: Url) -> Self {
-       
         Self {
             socket: None,
             url
@@ -25,7 +27,7 @@ impl Manager {
             ()
         })
     }
-    
+
     /// Reads from socket
     pub fn read(&mut self) -> Result<Option<ManagerResponse>, String> {
         if self.socket.is_none() {
@@ -38,6 +40,24 @@ impl Manager {
             None
         })
     }
+}
+
+pub fn start_manager_read_thread(window: Window, manager: OverlayManager) {
+    std::thread::spawn(move || {
+        {
+            let mut manager = manager.lock().unwrap();
+            if let Err(err) = manager.reconnect() {
+                window.emit("manager", ManagerResponse::ManagerDisconnected { message: Some(err.to_string()) }).unwrap();
+                return;
+            }
+        }
+        loop {
+            if let Ok(Some(response)) = manager.lock().unwrap().read() {
+                window.emit("manager", response).unwrap();
+            }
+            sleep(Duration::from_secs(5))
+        }
+    });
 }
 
 #[derive(serde::Serialize, Clone)]

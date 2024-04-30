@@ -5,13 +5,17 @@
 
 mod manager;
 
+use log::debug;
+use std::env;
+use std::ops::Deref;
 use sysinfo::{Pid, ProcessStatus, System};
 use tauri::{AppHandle, Manager, PhysicalPosition, Position, Size, State, Url, Window};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use active_win_pos_rs::get_active_window;
 use tungstenite::{connect, Message};
-use crate::manager::ManagerResponse;
+use log::{error, trace};
+use crate::manager::{ManagerResponse, OverlayManagerInstance, start_manager_read_thread};
 
 
 #[cfg(windows)]
@@ -29,26 +33,43 @@ enum ViewState {
     Interactable /* Should not change without user's control */
 }
 
+pub type OverlayManager = Arc<Mutex<OverlayManagerInstance>>;
+
 struct AppData {
     sys: System,
-    view_state: ViewState
+    view_state: ViewState,
+    manager: OverlayManager
 }
 
 impl AppData {
-    pub fn new() -> Self {
+    pub fn new(manager_inst: OverlayManagerInstance) -> Self {
         let mut sys = System::new();
         sys.refresh_processes();
         Self {
             sys,
-            view_state: ViewState::Hidden
+            view_state: ViewState::Hidden,
+            manager: Arc::new(Mutex::new(manager_inst))
         }
     }
 }
 
+fn init_data() -> AppData {
+    let url = Url::parse(&std::env::var("MANAGER_WS_URL").unwrap_or_else(|_| "ws://127.0.0.1:3011".to_string())).expect("bad MANAGER_WS_URL");
+    let manager = manager::OverlayManagerInstance::new(url);
+    AppData::new(manager)
+}
+
 fn main() {
+    if std::env::var("RUST_LOG").is_err() {
+        std::env::set_var("RUST_LOG", format!("warn,{}=info", env!("CARGO_PKG_NAME")));
+    }
+    pretty_env_logger::init();
+
     let context = tauri::generate_context!();
-    let data = Mutex::new(AppData::new());
+    let data = Mutex::new(init_data());
+
     tauri::Builder::default()
+        .manage(data)
         .setup(|app| {
             let main_window = app.get_window("main").unwrap();
             main_window.set_always_on_top(true).unwrap();
@@ -61,11 +82,13 @@ fn main() {
             main_window
                 .set_position(Position::Physical(PhysicalPosition { x: 0, y: 0 }))
                 .unwrap();
-
+            {
+                let manager = app.state::<OverlayManager>();
+                start_manager_read_thread(main_window.clone(), manager.deref().clone())
+            }
             Ok(())
         })
-        .manage(data)
-        .invoke_handler(tauri::generate_handler![check_process, init_manager, init_login, overlay_key, init_process_check])
+        .invoke_handler(tauri::generate_handler![init_manager, init_login, overlay_key, init_process_check])
         .run(context)
         .expect("error while running tauri application");
 }
@@ -85,19 +108,28 @@ enum ProcessData {
 #[tauri::command]
 fn init_process_check(window: tauri::Window) {
     std::thread::spawn(move || {
+        debug!("process check thread started");
         loop {
             let state = window.state::<Mutex<AppData>>();
             let mut data = state.lock().unwrap();
             data.sys.refresh_processes();
             // let active_pid = get_active_window_pid();
-            let active_window = get_active_window().unwrap();
+            let active_window = match get_active_window() {
+                Ok(window) => window,
+                Err(_) => {
+                    error!("get_active_window returned error");
+                    continue;
+                }
+            };
             let our_pid = std::process::id() as u64;
+            trace!("our_pid={our_pid} active_window pid={}", active_window.process_id);
             let mut active = data.view_state == ViewState::Visible;
             // println!("active={} target={}", active_window.app_name, TARGET_PROC_NAME);
             if let Some(proc) = data.sys.processes_by_name(TARGET_PROC_NAME).next() {
                 let pid = proc.pid().as_u32();
                 // println!("proc found. pid={} active_pid={}", pid, active_window.process_id);
                 if active_window.process_id == our_pid || active_window.process_id == pid as u64 || active_window.app_name == TARGET_PROC_NAME {
+                    trace!("found proc. pid={pid}");
                     window.emit("process", ProcessDataResult {
                         pid,
                         cpu_usage: proc.cpu_usage(),
@@ -119,54 +151,16 @@ fn init_process_check(window: tauri::Window) {
                     data.view_state = ViewState::Hidden;
                     // window.hide().unwrap();
                     window.close().unwrap();
+                    debug!("app is now inactive, hiding overlay");
                 } else if data.view_state == ViewState::Hidden && active {
                     data.view_state = ViewState::Visible;
                     window.show().unwrap();
+                    debug!("app is now active, showing overlay");
                 }
             }
             std::thread::sleep(Duration::from_millis(PROCESS_CHECK_INTERVAL));
         }
     });
-}
-#[tauri::command]
-fn check_process(app: tauri::AppHandle, data: State<Mutex<AppData>>) -> Option<ProcessDataResult> {
-    let mut data = data.lock().unwrap();
-    data.sys.refresh_processes();
-    let window = app.get_window("main").unwrap();
-    // let active_pid = get_active_window_pid();
-    let active_window = get_active_window().unwrap();
-    println!("active = {:?}", active_window);
-    let our_pid = std::process::id() as u64;
-    let mut active = data.view_state == ViewState::Visible;
-    let mut result: Option<ProcessDataResult> = None;
-    if let Some(proc) = data.sys.processes_by_exact_name(TARGET_PROC_NAME).next() {
-        let pid = proc.pid().as_u32();
-        if active_window.process_id == our_pid || active_window.process_id == pid as u64{
-            result = Some(ProcessDataResult {
-                pid: proc.pid().as_u32(),
-                cpu_usage: proc.cpu_usage(),
-                start_time: proc.start_time(),
-                mem_usage: proc.memory(),
-                status: proc.status().to_string(),
-            });
-            active = true;
-        } else {
-            active = false;
-        }
-    } else {
-        active = false;
-    }
-
-    if data.view_state != ViewState::Interactable {
-        if data.view_state == ViewState::Visible && !active {
-            data.view_state = ViewState::Hidden;
-            window.hide().unwrap();
-        } else if data.view_state == ViewState::Hidden && active {
-            data.view_state = ViewState::Visible;
-            window.show().unwrap();
-        }
-    }
-    result
 }
 
 #[tauri::command]
@@ -186,11 +180,13 @@ async fn init_login(app: AppHandle) {
 fn overlay_key(window: Window, data: State<Mutex<AppData>>) -> bool {
     let mut data = data.lock().unwrap();
     if data.view_state == ViewState::Interactable {
+        debug!("overlay_key: hiding");
         data.view_state = ViewState::Hidden;
         window.hide().unwrap();
         window.set_ignore_cursor_events(true).unwrap();
         false
     } else {
+        debug!("overlay_key: showing");
         data.view_state = ViewState::Interactable;
         window.show().unwrap();
         window.set_ignore_cursor_events(false).unwrap();
@@ -201,18 +197,7 @@ fn overlay_key(window: Window, data: State<Mutex<AppData>>) -> bool {
 // init a background process on the command, and emit periodic events only to the window that used the command
 #[tauri::command]
 fn init_manager(window: Window) {
-    std::thread::spawn(move || {
-        let mut manager = manager::Manager::new(Url::parse(MANAGER_WS_URL).expect("bad manager url"));
-        if let Err(err) = manager.reconnect() {
-            window.emit("manager", ManagerResponse::ManagerDisconnected { message: Some(err.to_string()) }).unwrap();
-        } else {
-            loop {
-                if let Ok(Some(response)) = manager.read() {
-                    window.emit("manager", response).unwrap();
-                }
-            }
-        }
-    });
+
 }
 
 #[cfg(windows)]
