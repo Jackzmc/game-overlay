@@ -25,7 +25,7 @@ pub type Server = Arc<Mutex<ServerInstance>>;
 #[serde(rename_all = "snake_case")]
 #[serde(tag = "reason")]
 pub enum AuthFailure {
-    InvalidAuthToken,
+    InvalidAuthToken(Option<String>),
     Unknown,
     General(String),
     Timeout,
@@ -37,7 +37,13 @@ impl fmt::Display for AuthFailure {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             AuthFailure::General(msg) => write!(f, "{}", msg),
-            AuthFailure::InvalidAuthToken => write!(f, "auth token is either invalid or unauthorized"),
+            AuthFailure::InvalidAuthToken(msg) => {
+                if let Some(msg) = msg {
+                    write!(f, "{}", msg)
+                } else {
+                    write!(f, "auth token is either invalid or unauthorized")
+                }
+            },
             AuthFailure::ObjectNotFound => write!(f, "client or server being authorized does not exist"),
             _ => write!(f, "generic authentication failure")
         }
@@ -83,13 +89,13 @@ impl ManagerInstance {
 
     /// Starts a new client connection
     /// If auth token is not provided, client is temporarily
-    pub fn start_client(&mut self, addr: SocketAddr, tx: UnboundedSender<Message>) -> Result<Client, AuthFailure> {
+    pub fn start_client(&mut self, addr: SocketAddr, tx: UnboundedSender<Message>) -> Result<(Client, String), AuthFailure> {
         let id = ClientInstance::next_id();
         let client = ClientInstance::with_id(addr, tx, id.clone());
         let client = Arc::new(Mutex::new(client));
         debug!("start_client: at addr {addr:?}, id={id}");
-        self.clients.insert(id, client.clone());
-        Ok(client)
+        self.clients.insert(id.clone(), client.clone());
+        Ok((client, id))
     }
     fn _verify_client_token(&self, token: String) -> Result<ClientTokenClaims, String> {
         let claims: ClientTokenClaims = token.verify_with_key(JWT_SECRET_KEY.deref())
@@ -100,11 +106,22 @@ impl ManagerInstance {
         }
         Ok(claims)
     }
+    pub async fn authorize_client_token(&mut self, id: &str, auth_token: String) -> Result<(), AuthFailure> {
+        let claims: ClientTokenClaims = auth_token.verify_with_key(JWT_SECRET_KEY.deref())
+            .map_err(|e| AuthFailure::InvalidAuthToken(Some(e.to_string())))?;
+        let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
+        if claims.issued_at > now {
+            return Err(AuthFailure::InvalidAuthToken(Some("token issued in the future and is invalid".to_string())))
+        }
+        let steamid = SteamID::from_steam2(&claims.subject).map_err(|e| AuthFailure::InvalidAuthToken(None))?;
+        self.authorize_client(id, steamid).await?;
+        Ok(())
+    }
     /// Marks a client as authorized, storing their steamid & details, and notifies client connection
     pub async fn authorize_client(&mut self, id: &str, steamid: SteamID) -> Result<(), AuthFailure> {
         debug!("authorizing: {}", id);
         let user = self.steam.get_user_details(steamid).await
-            .map_err(|e| AppError::GenericServerError { message: e.to_string() })?;
+            .map_err(|e| AuthFailure::General(e.to_string()))?;
         let client = self.clients.get(id).ok_or_else(|| AuthFailure::ObjectNotFound)?;
         let mut client = client.lock().await;
         client._set_steamid(steamid);
@@ -147,7 +164,7 @@ impl ManagerInstance {
 
     pub fn try_authorize_server(&mut self, addr: SocketAddr, tx: UnboundedSender<Message>, auth_token: String) -> Result<Server, AuthFailure> {
         if auth_token.is_empty() {
-            return Err(AuthFailure::InvalidAuthToken)
+            return Err(AuthFailure::InvalidAuthToken(None))
         }
         let id = ServerInstance::next_id();
         let server = ServerInstance::with_id(addr, tx, id.clone());

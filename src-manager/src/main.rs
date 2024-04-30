@@ -268,7 +268,7 @@ enum InitConnectionResPayload {
     PendingClientLogin { url: String },
     ServerAuthorized,
     InvalidPayload { message: Option<String> },
-    AuthFailure(AuthFailure)
+    AuthError(AuthFailure)
 }
 impl Into<Message> for InitConnectionResPayload {
     fn into(self) -> Message {
@@ -307,17 +307,22 @@ async fn login_connection(mut ws: WebSocket, manager: Manager, req: InitConnecti
         InitConnectionReqPayload::Client { auth_token} => {
             debug!("login_connection - creating client");
             match mngr.start_client(addr, tx.clone()) {
-                Ok(client) => {
-                    let id = client.lock().await.id();
+                Ok((client, id)) => {
                     if let Some(token) = auth_token {
-
+                        if let Err(err) = mngr.authorize_client_token(&id, token).await {
+                            send(&mut ws, InitConnectionResPayload::AuthError(AuthFailure::General(err.to_string()))).await;
+                        } else {
+                            // Cleanup ID
+                            mngr.remove_client(&id);
+                        }
                     } else {
                         send(&mut ws, InitConnectionResPayload::PendingClientLogin { url: format!("{}/auth/login?id={id}", PUBLIC_URL.deref()) }).await;
+                        drop(mngr);
+                        init_client_connection(ws, (tx, rx), manager, client).await;
                     }
-                    init_client_connection(ws, (tx, rx), manager, client).await;
                 },
                 Err(e) => {
-                    send(&mut ws, InitConnectionResPayload::AuthFailure(e)).await;
+                    send(&mut ws, InitConnectionResPayload::AuthError(e)).await;
                 }
             }
         }
@@ -333,7 +338,7 @@ async fn login_connection(mut ws: WebSocket, manager: Manager, req: InitConnecti
                     init_server_connection(ws, (tx, rx), manager, server).await;
                 },
                 Err(e) => {
-                    send(&mut ws, InitConnectionResPayload::AuthFailure(e)).await;
+                    send(&mut ws, InitConnectionResPayload::AuthError(e)).await;
                 }
             }
         }
@@ -356,9 +361,11 @@ async fn init_client_connection(mut ws: WebSocket, (mut tx, mut rx): (UnboundedS
     debug!("entering client read loop");
     // Timeout if client doesn't authorize within CLIENT_AUTH_TIMEOUT
     if let Err(_) = tokio::time::timeout(CLIENT_AUTH_TIMEOUT, wait_for_client_auth(client.clone())).await {
-        send(&mut ws, InitConnectionResPayload::AuthFailure(AuthFailure::Timeout)).await;
+        send(&mut ws, InitConnectionResPayload::AuthError(AuthFailure::Timeout)).await;
     } else {
         let (mut ws_tx, mut ws_rx) = ws.split();
+        let client = client.clone();
+        let manager = manager.clone();
         // Read incoming messages from websocket:
         tokio::task::spawn(async move {
             while let Some(Ok(message)) = ws_rx.next().await {
@@ -394,22 +401,26 @@ async fn init_client_connection(mut ws: WebSocket, (mut tx, mut rx): (UnboundedS
 async fn init_server_connection(mut ws: WebSocket, (mut tx, mut rx): (UnboundedSender<Message>, UnboundedReceiverStream<Message>), manager: Manager, server: Server) {
     debug!("entering server read loop");
     let (mut ws_tx, mut ws_rx) = ws.split();
-    tokio::task::spawn(async move {
-        while let Some(Ok(message)) = ws_rx.next().await {
-            debug!("got message from server");
-            match serde_json::from_str::<ServerOutgoingEvent>(&message.into_text().unwrap()) {
-                Ok(event) => {
-                    let mut manager = manager.lock().await;
-                    if let Err(err) = manager.on_server_event(&event, server.clone()).await {
-                        error!("on_server_event error: {:?}", err);
+    {
+        let server = server.clone();
+        let manager = manager.clone();
+        tokio::task::spawn(async move {
+            while let Some(Ok(message)) = ws_rx.next().await {
+                debug!("got message from server");
+                match serde_json::from_str::<ServerOutgoingEvent>(&message.into_text().unwrap()) {
+                    Ok(event) => {
+                        let mut manager = manager.lock().await;
+                        if let Err(err) = manager.on_server_event(&event, server.clone()).await {
+                            error!("on_server_event error: {:?}", err);
+                        }
+                    },
+                    Err(e) => {
+                        tx.send(InitConnectionResPayload::InvalidPayload { message: Some(e.to_string()) }.into()).unwrap();
                     }
-                },
-                Err(e) => {
-                    tx.send(InitConnectionResPayload::InvalidPayload { message: Some(e.to_string()) }.into()).unwrap();
                 }
             }
-        }
-    });
+        });
+    }
 
     while let Some(msg) = rx.next().await {
         if let Err(e) = ws_tx.send(msg).await {
@@ -418,10 +429,10 @@ async fn init_server_connection(mut ws: WebSocket, (mut tx, mut rx): (UnboundedS
     }
 
     // Cleanup server
-    let client = server.lock().await;
-    let id = client.id();
+    let server = server.lock().await;
+    let id = server.id();
     drop(server);
-    manager.lock().await.remove_client(&id);
+    manager.lock().await.remove_server(&id);
 }
 async fn send(ws: &mut WebSocket, response: InitConnectionResPayload) -> bool {
     let json = serde_json::to_string(&response).unwrap();
