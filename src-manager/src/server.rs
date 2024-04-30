@@ -11,12 +11,14 @@ use crate::manager::{Client, RequestError};
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(tag = "type")]
+#[serde(rename_all = "snake_case")]
 /// Messages that are being sent to server (Server <- Manager)
 pub enum ServerIncomingRequest {
-
+    Authorized
 }
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(tag = "type")]
+#[serde(rename_all = "snake_case")]
 /// Messages that are being received from server. (Server -> Manager)
 pub enum ServerOutgoingEvent {
     PlayerJoined { steamid: String },
