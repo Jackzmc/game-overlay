@@ -2,10 +2,11 @@ use std::net::TcpStream;
 use std::sync::{Arc, Mutex};
 use std::thread::sleep;
 use std::time::Duration;
+use log::info;
 use tauri::{Manager, Url, Window};
 use tungstenite::stream::MaybeTlsStream;
 use tungstenite::{connect, WebSocket};
-use crate::{MANAGER_WS_URL, OverlayManager};
+use crate::{OverlayManager};
 
 pub struct OverlayManagerInstance {
     url: Url,
@@ -50,6 +51,7 @@ pub fn start_manager_read_thread(window: Window, manager: OverlayManager) {
                 window.emit("manager", ManagerResponse::ManagerDisconnected { message: Some(err.to_string()) }).unwrap();
                 return;
             }
+            info!("Manager connection successful")
         }
         loop {
             if let Ok(Some(response)) = manager.lock().unwrap().read() {

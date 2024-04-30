@@ -946,6 +946,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "game-overlay"
+version = "0.0.0"
+dependencies = [
+ "active-win-pos-rs",
+ "log",
+ "pretty_env_logger",
+ "serde",
+ "serde_json",
+ "sysinfo",
+ "tauri",
+ "tauri-build",
+ "tokio",
+ "tungstenite",
+]
+
+[[package]]
 name = "gdk"
 version = "0.15.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2951,22 +2967,6 @@ dependencies = [
  "webkit2gtk",
  "webview2-com",
  "windows 0.39.0",
-]
-
-[[package]]
-name = "tauri-app"
-version = "0.0.0"
-dependencies = [
- "active-win-pos-rs",
- "log",
- "pretty_env_logger",
- "serde",
- "serde_json",
- "sysinfo",
- "tauri",
- "tauri-build",
- "tokio",
- "tungstenite",
 ]
 
 [[package]]

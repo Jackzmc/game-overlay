@@ -41,7 +41,6 @@ onMounted(async() => {
   await listen("process", ({payload}) => {
     proc.value = payload
   })
-  invoke("init_manager")
   await register('Control+Shift+G', async() => {
     interactable.value = await invoke("overlay_key")
     const r: HTMLElement = document.querySelector(':root')!;
@@ -53,7 +52,7 @@ onMounted(async() => {
       r.style.setProperty("--opacity", "0.5")
     }
   });
-
+  console.info("Mount done")
 })
 onUnmounted(async() => {
   await unregisterAll()

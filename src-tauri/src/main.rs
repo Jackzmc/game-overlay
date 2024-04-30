@@ -5,7 +5,7 @@
 
 mod manager;
 
-use log::debug;
+use log::{debug, info, warn};
 use std::env;
 use std::ops::Deref;
 use sysinfo::{Pid, ProcessStatus, System};
@@ -19,11 +19,11 @@ use crate::manager::{ManagerResponse, OverlayManagerInstance, start_manager_read
 
 
 #[cfg(windows)]
-const TARGET_PROC_NAME: &str = "left4dead2.exe";
+// const TARGET_PROC_NAME: &str = "left4dead2.exe";
+const TARGET_PROC_NAME: &str = "thunderbird.exe";
 #[cfg(unix)]
 // const TARGET_PROC_NAME: &str = "left4dead2";
 const TARGET_PROC_NAME: &str = "thunderbird";
-const MANAGER_WS_URL: &str = "ws://localhost:3012/socket";
 const PROCESS_CHECK_INTERVAL: u64 = 1000 * 2;
 
 #[derive(PartialEq, serde::Serialize, Clone, Debug)]
@@ -66,10 +66,11 @@ fn main() {
     pretty_env_logger::init();
 
     let context = tauri::generate_context!();
-    let data = Mutex::new(init_data());
+    let data = init_data();
+    let manager = data.manager.clone();
+    let data = Mutex::new(data);
 
     tauri::Builder::default()
-        .manage(data)
         .setup(|app| {
             let main_window = app.get_window("main").unwrap();
             main_window.set_always_on_top(true).unwrap();
@@ -79,16 +80,16 @@ fn main() {
             main_window.hide().unwrap();
             let monitor = main_window.current_monitor().unwrap().unwrap();
             main_window.set_size(Size::from(monitor.size().to_owned())).unwrap();
-            main_window
-                .set_position(Position::Physical(PhysicalPosition { x: 0, y: 0 }))
-                .unwrap();
+            main_window.set_position(Position::Physical(PhysicalPosition { x: 0, y: 0 })).unwrap();
             {
-                let manager = app.state::<OverlayManager>();
-                start_manager_read_thread(main_window.clone(), manager.deref().clone())
+                start_manager_read_thread(main_window.clone(), manager);
+                start_process_check_thread(main_window.clone());
             }
+            debug!("tauri setup done");
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![init_login, overlay_key, init_process_check])
+        .manage(data)
+        .invoke_handler(tauri::generate_handler![init_login, overlay_key])
         .run(context)
         .expect("error while running tauri application");
 }
@@ -105,15 +106,11 @@ enum ProcessData {
     Result(ProcessDataResult),
 }
 
-#[tauri::command]
-fn init_process_check(window: tauri::Window) {
+fn start_process_check_thread(window: tauri::Window) {
     std::thread::spawn(move || {
-        debug!("process check thread started");
+        debug!("process check thread started. target process: {}", TARGET_PROC_NAME);
         loop {
             let state = window.state::<Mutex<AppData>>();
-            let mut data = state.lock().unwrap();
-            data.sys.refresh_processes();
-            // let active_pid = get_active_window_pid();
             let active_window = match get_active_window() {
                 Ok(window) => window,
                 Err(_) => {
@@ -123,8 +120,12 @@ fn init_process_check(window: tauri::Window) {
             };
             let our_pid = std::process::id() as u64;
             trace!("our_pid={our_pid} active_window pid={}", active_window.process_id);
+
+            let mut data = state.lock().unwrap();
+            data.sys.refresh_processes();
             let mut active = data.view_state == ViewState::Visible;
             // println!("active={} target={}", active_window.app_name, TARGET_PROC_NAME);
+
             if let Some(proc) = data.sys.processes_by_name(TARGET_PROC_NAME).next() {
                 let pid = proc.pid().as_u32();
                 // println!("proc found. pid={} active_pid={}", pid, active_window.process_id);
@@ -158,6 +159,7 @@ fn init_process_check(window: tauri::Window) {
                     debug!("app is now active, showing overlay");
                 }
             }
+            drop(data);
             std::thread::sleep(Duration::from_millis(PROCESS_CHECK_INTERVAL));
         }
     });
