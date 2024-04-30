@@ -7,6 +7,7 @@ mod manager;
 
 use log::debug;
 use std::env;
+use std::ops::Deref;
 use sysinfo::{Pid, ProcessStatus, System};
 use tauri::{AppHandle, Manager, PhysicalPosition, Position, Size, State, Url, Window};
 use std::sync::{Arc, Mutex};
@@ -14,7 +15,7 @@ use std::time::Duration;
 use active_win_pos_rs::get_active_window;
 use tungstenite::{connect, Message};
 use log::{error, trace};
-use crate::manager::ManagerResponse;
+use crate::manager::{ManagerResponse, OverlayManagerInstance, start_manager_read_thread};
 
 
 #[cfg(windows)]
@@ -32,20 +33,30 @@ enum ViewState {
     Interactable /* Should not change without user's control */
 }
 
+pub type OverlayManager = Arc<Mutex<OverlayManagerInstance>>;
+
 struct AppData {
     sys: System,
-    view_state: ViewState
+    view_state: ViewState,
+    manager: OverlayManager
 }
 
 impl AppData {
-    pub fn new() -> Self {
+    pub fn new(manager_inst: OverlayManagerInstance) -> Self {
         let mut sys = System::new();
         sys.refresh_processes();
         Self {
             sys,
-            view_state: ViewState::Hidden
+            view_state: ViewState::Hidden,
+            manager: Arc::new(Mutex::new(manager_inst))
         }
     }
+}
+
+fn init_data() -> AppData {
+    let url = Url::parse(&std::env::var("MANAGER_WS_URL").unwrap_or_else(|_| "ws://127.0.0.1:3011".to_string())).expect("bad MANAGER_WS_URL");
+    let manager = manager::OverlayManagerInstance::new(url);
+    AppData::new(manager)
 }
 
 fn main() {
@@ -55,8 +66,10 @@ fn main() {
     pretty_env_logger::init();
 
     let context = tauri::generate_context!();
-    let data = Mutex::new(AppData::new());
+    let data = Mutex::new(init_data());
+
     tauri::Builder::default()
+        .manage(data)
         .setup(|app| {
             let main_window = app.get_window("main").unwrap();
             main_window.set_always_on_top(true).unwrap();
@@ -69,10 +82,12 @@ fn main() {
             main_window
                 .set_position(Position::Physical(PhysicalPosition { x: 0, y: 0 }))
                 .unwrap();
-
+            {
+                let manager = app.state::<OverlayManager>();
+                start_manager_read_thread(main_window.clone(), manager.deref().clone())
+            }
             Ok(())
         })
-        .manage(data)
         .invoke_handler(tauri::generate_handler![init_manager, init_login, overlay_key, init_process_check])
         .run(context)
         .expect("error while running tauri application");
@@ -182,18 +197,7 @@ fn overlay_key(window: Window, data: State<Mutex<AppData>>) -> bool {
 // init a background process on the command, and emit periodic events only to the window that used the command
 #[tauri::command]
 fn init_manager(window: Window) {
-    std::thread::spawn(move || {
-        let mut manager = manager::Manager::new(Url::parse(MANAGER_WS_URL).expect("bad manager url"));
-        if let Err(err) = manager.reconnect() {
-            window.emit("manager", ManagerResponse::ManagerDisconnected { message: Some(err.to_string()) }).unwrap();
-        } else {
-            loop {
-                if let Ok(Some(response)) = manager.read() {
-                    window.emit("manager", response).unwrap();
-                }
-            }
-        }
-    });
+
 }
 
 #[cfg(windows)]
