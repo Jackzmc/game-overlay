@@ -2,16 +2,20 @@ use std::collections::HashMap;
 use std::error::Error;
 use std::fmt;
 use std::net::SocketAddr;
+use std::ops::Deref;
 use std::sync::Arc;
+use std::time::{SystemTime, UNIX_EPOCH};
 use axum::extract::ws::Message;
+use jwt::VerifyWithKey;
 use log::debug;
 use tokio::sync::Mutex;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use steamid_ng::SteamID;
 use tokio::sync::mpsc::UnboundedSender;
 use crate::client::{ClientIncomingRequest, ClientInstance, ClientOutgoingEvent};
+use crate::{AppError, JWT_SECRET_KEY};
 use crate::server::{ServerInstance, ServerOutgoingEvent};
-use crate::steam::SteamUser;
+use crate::steam::{SteamClient, SteamUser};
 
 
 pub type Client = Arc<Mutex<ClientInstance>>;
@@ -46,37 +50,61 @@ pub enum RequestError {
     InvalidData
 }
 
+#[derive(Serialize, Deserialize)]
+pub struct ClientTokenClaims {
+    #[serde(rename = "sub")]
+    pub subject: String,
+    #[serde(rename = "iss")]
+    pub issuer: String,
+    #[serde(rename = "iat")]
+    pub issued_at: u64,
+    #[serde(rename = "jti")]
+    pub jwt_id: Option<String>,
+    #[serde(rename = "ip")]
+    pub ip_addr: Option<String>
+}
 
-
-#[derive(Default)]
 pub struct ManagerInstance {
     clients: HashMap<String, Client>,
     client_steamid_map: HashMap<SteamID, String>, // Maps SteamID to HashMap
-    servers: HashMap<String, Server>
+    servers: HashMap<String, Server>,
+    steam: SteamClient
 }
 pub type Manager = Arc<tokio::sync::Mutex<ManagerInstance>>;
 impl ManagerInstance {
-
-    /// Loads stored
-    pub async fn load(&mut self) {
-
+    pub fn new(steam: SteamClient) -> Self {
+        Self {
+            clients: Default::default(),
+            client_steamid_map: Default::default(),
+            servers: Default::default(),
+            steam
+        }
     }
 
-    pub async fn save(&self) {
-
-    }
-
-    pub fn start_temp_client(&mut self, addr: SocketAddr, tx: UnboundedSender<Message>) -> Result<Client, AuthFailure> {
+    /// Starts a new client connection
+    /// If auth token is not provided, client is temporarily
+    pub fn start_client(&mut self, addr: SocketAddr, tx: UnboundedSender<Message>) -> Result<Client, AuthFailure> {
         let id = ClientInstance::next_id();
         let client = ClientInstance::with_id(addr, tx, id.clone());
         let client = Arc::new(Mutex::new(client));
-        debug!("start_temp_client: at addr {addr:?}, id={id}");
+        debug!("start_client: at addr {addr:?}, id={id}");
         self.clients.insert(id, client.clone());
         Ok(client)
     }
-
-    pub async fn authorize_client(&mut self, id: &str, steamid: SteamID, user_details: SteamUser) -> Result<(), AuthFailure> {
+    fn _verify_client_token(&self, token: String) -> Result<ClientTokenClaims, String> {
+        let claims: ClientTokenClaims = token.verify_with_key(JWT_SECRET_KEY.deref())
+            .map_err(|e| e.to_string())?;
+        let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
+        if claims.issued_at > now {
+            return Err("token issued in the future and is invalid".to_string())
+        }
+        Ok(claims)
+    }
+    /// Marks a client as authorized, storing their steamid & details, and notifies client connection
+    pub async fn authorize_client(&mut self, id: &str, steamid: SteamID) -> Result<(), AuthFailure> {
         debug!("authorizing: {}", id);
+        let user = self.steam.get_user_details(steamid).await
+            .map_err(|e| AppError::GenericServerError { message: e.to_string() })?;
         let client = self.clients.get(id).ok_or_else(|| AuthFailure::ObjectNotFound)?;
         let mut client = client.lock().await;
         client._set_steamid(steamid);
@@ -84,7 +112,7 @@ impl ManagerInstance {
         client.send_request(&ClientIncomingRequest::Authorized {
             steamid2: steamid.steam2(),
             auth_token: token,
-            user: user_details
+            user
         }).unwrap();
         self.client_steamid_map.insert(steamid, client.id());
         Ok(())

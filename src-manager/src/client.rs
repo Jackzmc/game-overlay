@@ -1,4 +1,5 @@
 use std::net::SocketAddr;
+use std::ops::Deref;
 use std::time::{SystemTime, UNIX_EPOCH};
 use axum::extract::ws::Message;
 use jwt::SignWithKey;
@@ -74,15 +75,14 @@ impl ClientInstance {
         if self.steamid.is_none() {
             return Err("Client is not authorized/missing steamid".to_string())
         }
-        let mut claims = std::collections::BTreeMap::new();
-        claims.insert("sub", self.steamid.unwrap().steam2());
-        claims.insert("iss", "manager".to_string());
-        claims.insert("iat", SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs().to_string());
-        claims.insert("jti", self.id.to_string());
-        claims.insert("ip", self.addr.to_string());
-        let raw = std::env::var("JWT_SECRET").expect("missing JWT_SECRET env");
-        let key: hmac::Hmac<sha2::Sha256> = hmac::Hmac::new_from_slice(raw.as_bytes()).expect("could not generate Hmac<Sha256> from JWT_SECRET");
-        claims.sign_with_key(&key).map_err(|e| {
+        let claims = crate::manager::ClientTokenClaims {
+            subject: self.steamid.unwrap().steam2(),
+            issuer: "manager".to_string(),
+            issued_at: SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs(),
+            jwt_id: Some(self.addr.to_string()),
+            ip_addr: Some(self.addr.to_string()),
+        };
+        claims.sign_with_key(JWT_SECRET_KEY.deref()).map_err(|e| {
             e.to_string()
         })
     }

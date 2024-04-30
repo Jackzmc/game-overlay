@@ -14,7 +14,7 @@ use std::net::SocketAddr;
 use std::ops::Deref;
 use std::path::PathBuf;
 use std::str::FromStr;
-use std::sync::{atomic::{AtomicUsize, Ordering}, Arc, OnceLock};
+use std::sync::{atomic::{AtomicUsize, Ordering}, Arc, OnceLock, Mutex};
 use std::time::Duration;
 use axum::{Router, ServiceExt};
 use axum::body::Body;
@@ -32,7 +32,7 @@ use uuid::Uuid;
 use serde::{Serialize,Deserialize};
 
 use crate::client::{ClientIncomingRequest, ClientOutgoingEvent};
-use crate::manager::{AuthFailure, Client, Manager, Server};
+use crate::manager::{AuthFailure, Client, Manager, ManagerInstance, Server};
 use crate::server::{ServerIncomingRequest, ServerOutgoingEvent};
 use once_cell::sync::Lazy;
 use sha2::digest::KeyInit;
@@ -77,9 +77,10 @@ struct AppState {
 impl AppState {
 
     pub fn new() -> Self {
-        let manager = Manager::default();
         let http_client = get_client();
         let steam = SteamClient::new(http_client.clone(), std::env::var("STEAM_APIKEY").expect("missing STEAM_APIKEY"));
+        let manager = ManagerInstance::new(steam.clone());
+        let manager: Manager = Arc::new(tokio::sync::Mutex::new(manager));
         let mut hb = Handlebars::new();
         load_templates(&mut hb);
 
@@ -200,12 +201,9 @@ async fn route_steam_callback(
     let steamid = SteamID::from(steamid2);
     state.steam.verify_openid(&mut query.openid).await
         .map_err(|e| AppError::GenericServerError { message: e.0 })?;
-    debug!("auth success, fetching user details");
-    let user = state.steam.get_user_details(steamid).await
-        .map_err(|e| AppError::GenericServerError { message: e.to_string() })?;
-    debug!("got user details, telling manager");
+    debug!("auth success, authorizing with manager");
     let mut manager = state.manager.lock().await;
-    manager.authorize_client(&query.id, steamid.clone(), user).await
+    manager.authorize_client(&query.id, steamid.clone()).await
         .map_err(|e| AppError::GenericServerError { message: e.to_string() })?;
     Ok(RenderHtml("login_success", state.engine.clone(), json!({})))
 }
@@ -307,21 +305,19 @@ async fn login_connection(mut ws: WebSocket, manager: Manager, req: InitConnecti
     // TODO: add timeout, to remove temp clients
     match req {
         InitConnectionReqPayload::Client { auth_token} => {
-            debug!("login_connection - starting temp client");
-            if let Some(auth_token) = auth_token {
-                match mngr.authorize
-                // TODO: implement
-            } else {
-                match mngr.start_client(addr, tx.clone()) {
-                    Ok(client) => {
-                        let id = client.lock().await.id();
+            debug!("login_connection - creating client");
+            match mngr.start_client(addr, tx.clone()) {
+                Ok(client) => {
+                    let id = client.lock().await.id();
+                    if let Some(token) = auth_token {
+
+                    } else {
                         send(&mut ws, InitConnectionResPayload::PendingClientLogin { url: format!("{}/auth/login?id={id}", PUBLIC_URL.deref()) }).await;
-                        drop(mngr);
-                        init_client_connection(ws, (tx, rx), manager, client).await;
-                    },
-                    Err(e) => {
-                        send(&mut ws, InitConnectionResPayload::AuthFailure(e)).await;
                     }
+                    init_client_connection(ws, (tx, rx), manager, client).await;
+                },
+                Err(e) => {
+                    send(&mut ws, InitConnectionResPayload::AuthFailure(e)).await;
                 }
             }
         }
