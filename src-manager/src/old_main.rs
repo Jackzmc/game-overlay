@@ -13,11 +13,9 @@ use std::io::ErrorKind;
 use std::net::SocketAddr;
 use std::ops::Deref;
 use std::path::PathBuf;
-use std::str::FromStr;
 use std::sync::{atomic::{AtomicUsize, Ordering}, Arc, OnceLock};
 use std::time::Duration;
 use axum::{Router, ServiceExt};
-use axum::body::Body;
 use axum::extract::{ConnectInfo, Query, State};
 use axum::routing::{get, post};
 use axum_template::engine::Engine;
@@ -25,25 +23,24 @@ use futures_util::{SinkExt, StreamExt, TryFutureExt, TryStreamExt};
 use handlebars::Handlebars;
 use tokio::sync::{mpsc, RwLock};
 use tokio_stream::wrappers::UnboundedReceiverStream;
+use warp::ws::{Message, WebSocket};
+use warp::{Filter, hyper, method, reject, Rejection, Reply, reply, ws};
 use log::{debug, error, info, warn};
 use serde_json::{json, Value};
 use steamid_ng::SteamID;
 use uuid::Uuid;
+use warp::addr::remote;
 use serde::{Serialize,Deserialize};
-
+use warp::filters::method;
 use crate::client::{ClientIncomingRequest, ClientOutgoingEvent};
 use crate::manager::{AuthFailure, Client, Manager, Server};
 use crate::server::{ServerIncomingRequest, ServerOutgoingEvent};
 use once_cell::sync::Lazy;
+use reqwest::{Error, Response};
 use sha2::digest::KeyInit;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
+use warp::http::StatusCode;
 use crate::steam::{OpenIDPayload, SteamClient, SteamUser};
-use axum::extract::WebSocketUpgrade;
-use axum::extract::ws::{Message, WebSocket};
-use axum::http::response::Parts;
-use axum::http::StatusCode;
-use axum::response::IntoResponse;
-use axum_template::{RenderHtml, TemplateEngine};
 
 type QueryMap = HashMap<String, String>;
 static CLIENT_AUTH_TIMEOUT: Duration = Duration::from_secs(60 * 4);
@@ -51,45 +48,26 @@ static LISTEN_ADDRESS: Lazy<SocketAddr> = Lazy::new(|| std::env::var("LISTEN_HOS
     .parse().expect("bad LISTEN_HOST"));
 static PUBLIC_URL: Lazy<String> = Lazy::new(|| std::env::var("PUBLIC_URL").unwrap_or_else(|_| "http://localhost:3011".to_string()) );
 static APP_USER_AGENT: &str = concat!(
-    env!("CARGO_PKG_NAME"),
-    "/",
-    env!("CARGO_PKG_VERSION"),
+env!("CARGO_PKG_NAME"),
+"/",
+env!("CARGO_PKG_VERSION"),
 );
 static JWT_SECRET_KEY: Lazy<hmac::Hmac<sha2::Sha256>> = Lazy::new(|| {
     let raw = std::env::var("JWT_SECRET").expect("missing JWT_SECRET env");
     hmac::Hmac::new_from_slice(raw.as_bytes()).expect("could not generate Hmac<Sha256> from JWT_SECRET")
 });
 
+
 #[derive(Debug)]
 struct MissingQueryParameter(String);
 #[derive(Debug, Serialize)]
 struct SteamAuthError(String);
 
-struct ServeDir(PathBuf);
-#[derive(Clone)]
-struct AppState {
-    manager: Manager,
-    steam: SteamClient,
-    http: reqwest::Client,
-    engine: Engine<Handlebars<'static>>
-}
-impl AppState {
 
-    pub fn new() -> Self {
-        let manager = Manager::default();
-        let http_client = get_client();
-        let steam = SteamClient::new(http_client.clone(), std::env::var("STEAM_APIKEY").expect("missing STEAM_APIKEY"));
-        let mut hb = Handlebars::new();
-        load_templates(&mut hb);
+impl reject::Reject for MissingQueryParameter {}
+impl reject::Reject for SteamAuthError {}
+impl reject::Reject for ErrorResponse {}
 
-        Self {
-            manager,
-            steam,
-            http: http_client,
-            engine: Engine::from(hb),
-        }
-    }
-}
 #[tokio::main]
 async fn main() {
     if std::env::var("RUST_LOG").is_err() {
@@ -97,111 +75,87 @@ async fn main() {
     }
     pretty_env_logger::init();
 
-    let state = AppState::new();
-    let assets_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("static");
+    let manager_inst = Manager::default();
+    let manager = warp::any().map(move || manager_inst.clone());
 
-    let app = Router::new()
-        // .fallback_service(ServeDir::new(assets_dir).append_index_html_on_directories(true))
-        .route("/socket", get(route_socket))
-        .route("/auth/login", get(route_steam_login))
-        .route("/auth/callback", get(route_steam_callback))
-        .with_state(Arc::new(state));
 
-    let listener = tokio::net::TcpListener::bind(*LISTEN_ADDRESS).await.unwrap();
-    info!("listening on {}", LISTEN_ADDRESS.to_string());
-    info!("public url: {}", PUBLIC_URL.deref());
-    axum::serve(listener, app.into_make_service_with_connect_info::<SocketAddr>()).await.unwrap();
-}
+    let client = get_client();
+    let steam = SteamClient::new(client.clone(), std::env::var("STEAM_APIKEY").expect("missing STEAM_APIKEY"));
+    let client = warp::any().map(move || client.clone());
+    let steam = warp::any().map(move || steam.clone());
 
-#[derive(Serialize)]
-#[serde(tag = "error")]
-#[serde(rename_all = "snake_case")]
-enum AppError {
-    SessionExpired,
-    GenericServerError { message: String },
-    EntityNotFound { message: String },
-    MissingQueryParameter(String)
-}
+    let mut hb = Handlebars::new();
+    load_templates(&mut hb);
+    let hb = Arc::new(hb);
+    let handlebars = move |with_template| render(with_template, hb.clone());
 
-impl IntoResponse for AppError {
-    fn into_response(self) -> axum::response::Response {
-        let (status, message) = match self {
-            AppError::MissingQueryParameter(param) => {
-                (StatusCode::BAD_REQUEST, serde_json::to_string(&json!({
-                    "error": "MISSING_QUERY_PARAMETER",
-                    "param": &param,
-                    "message": format!("The parameter \"{param}\" is required").to_string()
-                })))
-            },
-            e @ AppError::EntityNotFound { .. } => {
-                (StatusCode::NOT_FOUND, serde_json::to_string(&e))
-            },
-            e @ AppError::GenericServerError { .. } => {
-                (StatusCode::INTERNAL_SERVER_ERROR, serde_json::to_string(&e))
-            },
-            AppError::SessionExpired => {
-                (StatusCode::NOT_FOUND, serde_json::to_string(&json!({
-                    "error": "SESSION_EXPIRED",
-                    "message": "Session has expired or id is invalid"
-                })))
+    let socketf = warp::path("socket")
+        // The `ws()` filter will prepare Websocket handshake...
+        .and(warp::ws())
+        .and(manager.clone())
+        .and(remote())
+        .map(|ws: warp::ws::Ws, manager: Manager, addr: Option<SocketAddr>| -> Box<dyn warp::Reply> {
+            if let Some(addr) = addr {
+                Box::new(ws.on_upgrade(move |socket| init_connection(socket, addr, manager.clone())))
+            } else {
+                Box::new(warp::reply::with_status(warp::reply::json(&json!({
+                    "error": "UNSUPPORTED_TRANSPORT",
+                    "message": "Transport does not provide IP addresses, unsupported"
+                })), warp::http::StatusCode::BAD_REQUEST))
             }
-        };
+        });
 
-        axum::response::Response::builder()
-            .status(status)
-            .header("content-type", "application/json")
-            .body(Body::from(message.expect("could not serialize error response")))
-            .unwrap()
-    }
-}
-
-async fn route_socket(
-    ws: WebSocketUpgrade,
-    ConnectInfo(addr): ConnectInfo<SocketAddr>,
-    State(state): State<Arc<AppState>>
-) -> impl IntoResponse {
-    let manager = state.manager.clone();
-    ws.on_upgrade(move |socket: WebSocket| init_connection(socket, addr, manager))
-}
-
-
-async fn route_steam_login(
-    Query(query): Query<HashMap<String, String>>,
-    ConnectInfo(addr): ConnectInfo<SocketAddr>,
-    State(state): State<Arc<AppState>>
-) -> impl IntoResponse{
-    if let Some(id) = query.get("id") {
-        if state.manager.lock().await.verify_client(id, &addr).await {
-            // Ok(state.engine.render("login", ).map_err(|e| AppError::GenericServerError { message: e.to_string() })?)
-            Ok(RenderHtml("login", state.engine.clone(), json!({
+    let login = warp::path!("auth"/"login")
+        .and(warp::query::<QueryMap>())
+        .and(manager.clone())
+        .and(remote())
+        .and_then(|query: QueryMap, manager: Manager, addr: Option<SocketAddr>| async move  {
+            if let Some(id) = query.get("id") {
+                if manager.lock().await.verify_client(id, &addr.unwrap()).await {
+                    Ok(id.to_string())
+                } else {
+                    Err(reject::not_found())
+                }
+            } else {
+                Err(reject::custom(MissingQueryParameter("id".to_string())))
+            }
+        })
+        .map(|id: String| WithTemplate {
+            name: "login",
+            value: json!({
                 "host": PUBLIC_URL.deref(),
                 "id": id
-            })))
-        } else {
-            Err(AppError::SessionExpired)
-        }
-    } else {
-        Err(AppError::MissingQueryParameter("id".to_string()))
-    }
-}
+            }),
+        })
+        .map(handlebars)
+        .recover(handle_rejection);
 
-async fn route_steam_callback(
-    Query(mut query): Query<OpenIdCallback>,
-    ConnectInfo(addr): ConnectInfo<SocketAddr>,
-    State(state): State<Arc<AppState>>
-) -> Result<impl IntoResponse, AppError> {
-    let (_,steamid2) = query.openid.identity.rsplit_once("/").unwrap();
-    debug!("raw: {}. steamid2: {}", query.openid.identity, steamid2);
-    let steamid2: u64 = steamid2.parse().unwrap();
-    let steamid = SteamID::from(steamid2);
-    state.steam.verify_openid(&mut query.openid).await
-        .map_err(|e| AppError::GenericServerError { message: e.0 })?;
-    let user = state.steam.get_user_details(SteamID::from_steam2(&query.openid.identity).unwrap()).await
-        .map_err(|e| AppError::GenericServerError { message: e.to_string() })?;
-    let mut manager = state.manager.lock().await;
-    manager.authorize_client(&query.id, steamid.clone(), user).await
-        .map_err(|e| AppError::GenericServerError { message: e.to_string() })?;
-    Ok(RenderHtml("login_success", state.engine.clone(), json!({})))
+
+    let callback = warp::path!("auth" / "callback")
+        .and(method::post())
+        .and(warp::query::<OpenIdCallback>())
+        .and(steam)
+        .and(manager)
+        .and(client)
+        .and(remote())
+        .and_then(|mut query: OpenIdCallback, mut steam: SteamClient, manager: Manager, client: reqwest::Client, addr: Option<SocketAddr>| async move {
+            let steamid = SteamID::from_steam2(&query.openid.identity).expect("openid identity is bad");
+            steam.verify_openid(&mut query.openid).await?;
+            let user = steam.get_user_details(SteamID::from_steam2(&query.openid.identity).unwrap()).await
+                .map_err(|e| reject::custom(SteamAuthError(e.to_string())))?;
+            let mut manager = manager.lock().await;
+            manager.authorize_client(&query.id, steamid.clone()).await?;
+            Ok(())
+            // Ok::<(), Rejection>(())
+        })
+        .map(|r| {
+            reply::html("<h1>Steam login complete</h1><p>You can now close this page</p>")
+        })
+        .recover(handle_rejection);
+
+    let routes = socket.or(login).or(callback);
+
+    warp::serve(routes).run(*LISTEN_ADDRESS).await;
 }
 
 #[derive(Serialize, Deserialize)]
@@ -224,7 +178,50 @@ struct ErrorResponse {
     error: String,
     message: Option<String>
 }
+async fn handle_rejection(err: Rejection) -> Result<impl Reply, std::convert::Infallible> {
+    let code;
+    let response: ErrorResponse;
 
+    if err.is_not_found() {
+        code = StatusCode::NOT_FOUND;
+        response = ErrorResponse {
+            error: "NOT_FOUND".to_string(),
+            message: Some("Resource not found".to_string())
+        }
+    } else if let Some(MissingQueryParameter(param)) = err.find() {
+        code = StatusCode::BAD_REQUEST;
+        response = ErrorResponse {
+            error: "QUERY_PARAMETER_REQUIRED".to_string(),
+            message: Some(format!("{param} is a required query parameter"))
+        }
+    }  else {
+        // We should have expected this... Just log and say its a 500
+        eprintln!("unhandled rejection: {:?}", err);
+        code = StatusCode::INTERNAL_SERVER_ERROR;
+        response = ErrorResponse {
+            error: "UNHANDLED_REJECTION".to_string(),
+            message: None
+        };
+    }
+
+    let json = warp::reply::json(&response);
+    Ok(warp::reply::with_status(json, code))
+}
+
+struct WithTemplate<T: Serialize> {
+    name: &'static str,
+    value: T,
+}
+
+fn render<T>(template: WithTemplate<T>, hbs: Arc<Handlebars<'_>>) -> impl warp::Reply
+    where
+        T: Serialize,
+{
+    let render = hbs
+        .render(template.name, &template.value)
+        .unwrap_or_else(|err| err.to_string());
+    warp::reply::html(render)
+}
 fn load_templates(hb: &mut Handlebars) {
     match fs::read_dir(env::current_dir().unwrap().join("templates")) {
         Ok(files) => {
@@ -267,7 +264,7 @@ enum InitConnectionResPayload {
 }
 impl Into<Message> for InitConnectionResPayload {
     fn into(self) -> Message {
-        Message::Text(serde_json::to_string(&self).unwrap())
+        Message::text(serde_json::to_string(&self).unwrap())
     }
 }
 
@@ -278,7 +275,7 @@ async fn init_connection(mut ws: WebSocket, addr: SocketAddr, manager: Manager) 
     tokio::task::spawn(async move {
         if let Some(Ok(message)) = ws.next().await {
             debug!("incoming msg");
-            match serde_json::from_str::<InitConnectionReqPayload>(&message.into_text().unwrap()) {
+            match serde_json::from_str::<InitConnectionReqPayload>(message.to_str().unwrap()) {
                 Ok(json) => {
                     login_connection(ws, manager, json, addr).await;
                 },
@@ -356,7 +353,7 @@ async fn init_client_connection(mut ws: WebSocket, (mut tx, mut rx): (UnboundedS
         tokio::task::spawn(async move {
             while let Some(Ok(message)) = ws_rx.next().await {
                 debug!("got message from client");
-                match serde_json::from_str::<ClientOutgoingEvent>(&message.into_text().unwrap()) {
+                match serde_json::from_str::<ClientOutgoingEvent>(message.to_str().unwrap()) {
                     Ok(event) => {
                         let mut manager = manager.lock().await;
                         if let Err(err) = manager.on_client_event(&event, client.clone()).await {
@@ -382,7 +379,7 @@ async fn init_server_connection(mut ws: WebSocket, (mut tx, mut rx): (UnboundedS
     tokio::task::spawn(async move {
         while let Some(Ok(message)) = ws_rx.next().await {
             debug!("got message from server");
-            match serde_json::from_str::<ServerOutgoingEvent>(&message.into_text().unwrap()) {
+            match serde_json::from_str::<ServerOutgoingEvent>(message.to_str().unwrap()) {
                 Ok(event) => {
                     let mut manager = manager.lock().await;
                     if let Err(err) = manager.on_server_event(&event, server.clone()).await {
@@ -402,5 +399,5 @@ async fn init_server_connection(mut ws: WebSocket, (mut tx, mut rx): (UnboundedS
 }
 async fn send(ws: &mut WebSocket, response: InitConnectionResPayload) -> bool {
     let json = serde_json::to_string(&response).unwrap();
-    ws.send(Message::Text(json)).await.is_ok()
+    ws.send(Message::text(json)).await.is_ok()
 }

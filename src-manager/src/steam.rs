@@ -53,6 +53,7 @@ impl SteamClient {
             .map_err(|e| SteamAuthError(e.to_string()))?;
         let text = res.text().await.unwrap();
         // lazy way to check, might want to properly parse it in future?
+        debug!("openid response: {}", text);
         if !text.contains("valid:true") {
             return Err(SteamAuthError("Steam auth verification failed".to_string()));
         }
