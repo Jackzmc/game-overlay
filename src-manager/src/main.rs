@@ -44,6 +44,7 @@ use axum::http::response::Parts;
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum_template::{RenderHtml, TemplateEngine};
+use tokio::time::timeout;
 
 type QueryMap = HashMap<String, String>;
 static CLIENT_AUTH_TIMEOUT: Duration = Duration::from_secs(60 * 4);
@@ -303,14 +304,15 @@ async fn login_connection(mut ws: WebSocket, manager: Manager, req: InitConnecti
     let (tx, rx) = mpsc::unbounded_channel();
     let mut rx = UnboundedReceiverStream::new(rx);
     let mut mngr = manager.lock().await;
-
+    // TODO: add timeout, to remove temp clients
     match req {
         InitConnectionReqPayload::Client { auth_token} => {
             debug!("login_connection - starting temp client");
             if let Some(auth_token) = auth_token {
+                match mngr.authorize
                 // TODO: implement
             } else {
-                match mngr.start_temp_client(addr, tx.clone()) {
+                match mngr.start_client(addr, tx.clone()) {
                     Ok(client) => {
                         let id = client.lock().await.id();
                         send(&mut ws, InitConnectionResPayload::PendingClientLogin { url: format!("{}/auth/login?id={id}", PUBLIC_URL.deref()) }).await;
@@ -327,8 +329,11 @@ async fn login_connection(mut ws: WebSocket, manager: Manager, req: InitConnecti
             debug!("login_connection - authorizing server");
             match mngr.try_authorize_server(addr, tx.clone(), auth_token) {
                 Ok(server) => {
-                    send(&mut ws, InitConnectionResPayload::ServerAuthorized).await;
                     drop(mngr);
+                    {
+                        let server_inst = server.lock().await;
+                        server_inst.send_request(&ServerIncomingRequest::Authorized).unwrap();
+                    }
                     init_server_connection(ws, (tx, rx), manager, server).await;
                 },
                 Err(e) => {
@@ -381,6 +386,12 @@ async fn init_client_connection(mut ws: WebSocket, (mut tx, mut rx): (UnboundedS
             ws_tx.send(msg).await.unwrap();
         }
     }
+
+    // Clean up client
+    let client = client.lock().await;
+    let id = client.id();
+    drop(client);
+    manager.lock().await.remove_client(&id);
 }
 async fn init_server_connection(mut ws: WebSocket, (mut tx, mut rx): (UnboundedSender<Message>, UnboundedReceiverStream<Message>), manager: Manager, server: Server) {
     debug!("entering server read loop");
@@ -405,6 +416,12 @@ async fn init_server_connection(mut ws: WebSocket, (mut tx, mut rx): (UnboundedS
     while let Some(msg) = rx.next().await {
         ws_tx.send(msg).await.unwrap();
     }
+
+    // Cleanup server
+    let client = server.lock().await;
+    let id = client.id();
+    drop(server);
+    manager.lock().await.remove_client(&id);
 }
 async fn send(ws: &mut WebSocket, response: InitConnectionResPayload) -> bool {
     let json = serde_json::to_string(&response).unwrap();
