@@ -93,7 +93,10 @@ impl AppState {
 #[tokio::main]
 async fn main() {
     if std::env::var("RUST_LOG").is_err() {
-        std::env::set_var("RUST_LOG", "info");
+        std::env::set_var("RUST_LOG", format!("warn,{}=info", env!("CARGO_PKG_NAME")));
+    }
+    if env::var("STEAM_DONT_VALIDATE").is_ok() {
+        warn!("Env STEAM_DONT_VALIDATE is set, validation of steam logins will not take place");
     }
     pretty_env_logger::init();
 
@@ -114,7 +117,7 @@ async fn main() {
 }
 
 #[derive(Serialize)]
-#[serde(tag = "error")]
+#[serde(tag = "error", rename = "SCREAMING_SNAKE_CASE")]
 #[serde(rename_all = "snake_case")]
 enum AppError {
     SessionExpired,
@@ -196,8 +199,10 @@ async fn route_steam_callback(
     let steamid = SteamID::from(steamid2);
     state.steam.verify_openid(&mut query.openid).await
         .map_err(|e| AppError::GenericServerError { message: e.0 })?;
-    let user = state.steam.get_user_details(SteamID::from_steam2(&query.openid.identity).unwrap()).await
+    debug!("auth success, fetching user details");
+    let user = state.steam.get_user_details(steamid).await
         .map_err(|e| AppError::GenericServerError { message: e.to_string() })?;
+    debug!("got user details, telling manager");
     let mut manager = state.manager.lock().await;
     manager.authorize_client(&query.id, steamid.clone(), user).await
         .map_err(|e| AppError::GenericServerError { message: e.to_string() })?;
@@ -214,6 +219,7 @@ struct OpenIdCallback {
 
 fn get_client() -> reqwest::Client {
     reqwest::Client::builder()
+        .https_only(true)
         .user_agent(APP_USER_AGENT)
         .build()
         .expect("could not create HTTP client")

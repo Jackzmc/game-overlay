@@ -23,6 +23,7 @@ pub type Server = Arc<Mutex<ServerInstance>>;
 pub enum AuthFailure {
     InvalidAuthToken,
     Unknown,
+    General(String),
     Timeout,
     ObjectNotFound
 }
@@ -31,6 +32,7 @@ impl Error for AuthFailure {}
 impl fmt::Display for AuthFailure {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
+            AuthFailure::General(msg) => write!(f, "{}", msg),
             AuthFailure::InvalidAuthToken => write!(f, "auth token is either invalid or unauthorized"),
             AuthFailure::ObjectNotFound => write!(f, "client or server being authorized does not exist"),
             _ => write!(f, "generic authentication failure")
@@ -74,10 +76,11 @@ impl ManagerInstance {
     }
 
     pub async fn authorize_client(&mut self, id: &str, steamid: SteamID, user_details: SteamUser) -> Result<(), AuthFailure> {
+        debug!("authorizing: {}", id);
         let client = self.clients.get(id).ok_or_else(|| AuthFailure::ObjectNotFound)?;
         let mut client = client.lock().await;
         client._set_steamid(steamid);
-        let token = client.generate_auth_token().expect("client missing steamid/not authorized");
+        let token = client.generate_auth_token().map_err(|e| AuthFailure::General(e))?;
         client.send_request(&ClientIncomingRequest::Authorized {
             steamid2: steamid.steam2(),
             auth_token: token,

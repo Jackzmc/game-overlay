@@ -12,6 +12,7 @@ use crate::manager::{RequestError, Server};
 use crate::steam::SteamUser;
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(tag = "type")]
 /// Messages that are being sent to client (Client <- Manager)
 pub enum ClientIncomingRequest {
     ClientJoined,
@@ -21,6 +22,7 @@ pub enum ClientIncomingRequest {
     Authorized { steamid2: String, auth_token: String, user: SteamUser }
 }
 #[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(tag = "type")]
 /// Messages that are being received from the client (Client -> Manager)
 pub enum ClientOutgoingEvent {
 
@@ -68,7 +70,7 @@ impl ClientInstance {
     }
 
     pub fn generate_auth_token(&self) -> Result<String, String> {
-        if !self.steamid.is_none() {
+        if self.steamid.is_none() {
             return Err("Client is not authorized/missing steamid".to_string())
         }
         let mut claims = std::collections::BTreeMap::new();
