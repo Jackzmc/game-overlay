@@ -3,14 +3,15 @@ use std::error::Error;
 use std::fmt;
 use std::net::SocketAddr;
 use std::sync::Arc;
+use axum::extract::ws::Message;
 use log::debug;
 use tokio::sync::Mutex;
 use serde::Serialize;
 use steamid_ng::SteamID;
 use tokio::sync::mpsc::UnboundedSender;
-use warp::ws::Message;
 use crate::client::{ClientIncomingRequest, ClientInstance, ClientOutgoingEvent};
 use crate::server::{ServerInstance, ServerOutgoingEvent};
+use crate::steam::SteamUser;
 
 
 pub type Client = Arc<Mutex<ClientInstance>>;
@@ -53,9 +54,6 @@ pub struct ManagerInstance {
 }
 pub type Manager = Arc<tokio::sync::Mutex<ManagerInstance>>;
 impl ManagerInstance {
-    pub fn new() -> Self {
-        Self::default()
-    }
 
     /// Loads stored
     pub async fn load(&mut self) {
@@ -75,10 +73,16 @@ impl ManagerInstance {
         Ok(client)
     }
 
-    pub async fn set_client_authorized(&mut self, id: &str, steamid: SteamID) -> Result<(), AuthFailure> {
+    pub async fn authorize_client(&mut self, id: &str, steamid: SteamID, user_details: SteamUser) -> Result<(), AuthFailure> {
         let client = self.clients.get(id).ok_or_else(|| AuthFailure::ObjectNotFound)?;
         let mut client = client.lock().await;
         client._set_steamid(steamid);
+        let token = client.generate_auth_token().expect("client missing steamid/not authorized");
+        client.send_request(&ClientIncomingRequest::Authorized {
+            steamid2: steamid.steam2(),
+            auth_token: token,
+            user: user_details
+        }).unwrap();
         self.client_steamid_map.insert(steamid, client.id());
         Ok(())
     }

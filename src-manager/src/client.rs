@@ -1,14 +1,15 @@
 use std::net::SocketAddr;
 use std::time::{SystemTime, UNIX_EPOCH};
+use axum::extract::ws::Message;
 use jwt::SignWithKey;
 use serde::{Deserialize, Serialize};
 use sha2::digest::KeyInit;
 use steamid_ng::SteamID;
 use tokio::sync::mpsc::UnboundedSender;
 use uuid::Uuid;
-use warp::ws::Message;
 use crate::JWT_SECRET_KEY;
 use crate::manager::{RequestError, Server};
+use crate::steam::SteamUser;
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 /// Messages that are being sent to client (Client <- Manager)
@@ -17,7 +18,7 @@ pub enum ClientIncomingRequest {
     ClientDisconnected,
     GameData {}, // TODO: implement
 
-    Authorized { steamid2: String, auth_token: String }
+    Authorized { steamid2: String, auth_token: String, user: SteamUser }
 }
 #[derive(Serialize, Deserialize, Debug, Clone)]
 /// Messages that are being received from the client (Client -> Manager)
@@ -63,7 +64,7 @@ impl ClientInstance {
 
     pub fn send_request(&self, request: &ClientIncomingRequest) -> Result<(), RequestError> {
         let json = serde_json::to_string(request).map_err(|_| RequestError::RequestNotSerializable)?;
-        self.tx.send(Message::text(json)).map_err(|_| ()).map_err(|_| RequestError::Disconnected)
+        self.tx.send(Message::Text(json)).map_err(|_| ()).map_err(|_| RequestError::Disconnected)
     }
 
     pub fn generate_auth_token(&self) -> Result<String, String> {

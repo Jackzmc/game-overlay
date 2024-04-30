@@ -1,11 +1,11 @@
 use std::collections::hash_map::Values;
 use std::collections::HashMap;
 use std::net::SocketAddr;
+use axum::extract::ws::Message;
 use serde::{Deserialize, Serialize};
 use steamid_ng::SteamID;
 use tokio::sync::mpsc::UnboundedSender;
 use uuid::Uuid;
-use warp::ws::Message;
 use crate::client::ClientIncomingRequest;
 use crate::manager::{Client, RequestError};
 
@@ -49,7 +49,7 @@ impl ServerInstance {
 
     pub fn send_request(&self, request: &ServerIncomingRequest) -> Result<(), RequestError> {
         let json = serde_json::to_string(request).map_err(|_| RequestError::RequestNotSerializable)?;
-        self.tx.send(Message::text(json)).map_err(|_| ()).map_err(|_| RequestError::Disconnected)
+        self.tx.send(Message::Text(json)).map_err(|_| ()).map_err(|_| RequestError::Disconnected)
     }
 
     fn get_client(&self, steamid: SteamID) -> Option<Client> {

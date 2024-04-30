@@ -2,8 +2,6 @@ use log::debug;
 use reqwest::{Error, RequestBuilder, Response};
 use serde::{Deserialize, Serialize};
 use steamid_ng::SteamID;
-use warp::http::StatusCode;
-use warp::reply;
 use crate::SteamAuthError;
 
 #[derive(Serialize, Deserialize)]
@@ -45,7 +43,7 @@ impl SteamClient {
         }
     }
 
-    pub async fn verify_openid(&mut self, query: &mut OpenIDPayload) -> Result<(),SteamAuthError> {
+    pub async fn verify_openid(&self, query: &mut OpenIDPayload) -> Result<(),SteamAuthError> {
         if let Some(error) = query.error.as_ref() {
             return Err(SteamAuthError(error.to_string()));
         }
@@ -63,7 +61,7 @@ impl SteamClient {
         Ok(())
     }
 
-    pub async fn get_user_details(&mut self, steamid: SteamID) -> Result<SteamUser, Error> {
+    pub async fn get_user_details(&self, steamid: SteamID) -> Result<SteamUser, Error> {
         let response = self.client.post(format!("https://api.steampowered.com/ISteamUser/GetPlayerSummaries/v2/?key=${}&format=json&steamids={}",
             self.apikey,
             u64::from(steamid)
@@ -74,7 +72,7 @@ impl SteamClient {
 
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct SteamUser {
     pub steamid: String,
     pub communityvisibilitystate: usize,
