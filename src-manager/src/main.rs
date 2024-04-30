@@ -378,7 +378,9 @@ async fn init_client_connection(mut ws: WebSocket, (mut tx, mut rx): (UnboundedS
 
         // Send messages to client
         while let Some(msg) = rx.next().await {
-            ws_tx.send(msg).await.unwrap();
+            if let Err(e) = ws_tx.send(msg).await {
+                break;
+            }
         }
     }
 }
@@ -403,7 +405,9 @@ async fn init_server_connection(mut ws: WebSocket, (mut tx, mut rx): (UnboundedS
     });
 
     while let Some(msg) = rx.next().await {
-        ws_tx.send(msg).await.unwrap();
+        if let Err(e) = ws_tx.send(msg).await {
+            break;
+        }
     }
 }
 async fn send(ws: &mut WebSocket, response: InitConnectionResPayload) -> bool {
