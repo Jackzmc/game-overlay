@@ -88,7 +88,7 @@ fn main() {
             }
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![init_manager, init_login, overlay_key, init_process_check])
+        .invoke_handler(tauri::generate_handler![init_login, overlay_key, init_process_check])
         .run(context)
         .expect("error while running tauri application");
 }
@@ -193,40 +193,3 @@ fn overlay_key(window: Window, data: State<Mutex<AppData>>) -> bool {
         true
     }
 }
-
-// init a background process on the command, and emit periodic events only to the window that used the command
-#[tauri::command]
-fn init_manager(window: Window) {
-
-}
-
-#[cfg(windows)]
-fn get_active_window_pid() -> u32 {
-
-    unsafe {
-        let hwnd = GetForegroundWindow();
-
-        let mut pid: u32 = 0;
-        GetWindowThreadProcessId(hwnd, Some(&mut pid));
-        pid
-    }
-}
-// fn get_active_window() -> (u32, String) {
-//     unsafe {
-//        let pid = get_active_window_pid();
-//
-//         let proc = OpenProcess(
-//             PROCESS_QUERY_INFORMATION,
-//             false,
-//             pid
-//         ).expect("could not open");
-//
-//
-//         let mut bytes: [u16; 500] = [0; 500];
-//         let len = GetModuleBaseNameW(proc, HMODULE(0), &mut bytes);
-//         // let len = windows::Win32::System::ProcessStatus::GetProcessImageFileNameW(proc, &mut bytes);
-//         let exe = String::from_utf16_lossy(&bytes[..len as usize]);
-//
-//         (pid, exe)
-//     }
-// }
