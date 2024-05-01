@@ -289,12 +289,13 @@ async fn login_connection(mut ws: WebSocket, manager: Manager, req: InitConnecti
                             // Cleanup ID
                             send(&mut ws, InitConnectionResPayload::AuthError(AuthFailure::General(err.to_string()))).await;
                             mngr.remove_client(&id);
+                            return;
                         }
                     } else {
                         send(&mut ws, InitConnectionResPayload::PendingClientLogin { url: format!("{}/auth/login?id={id}", PUBLIC_URL.deref()) }).await;
-                        drop(mngr);
-                        init_client_connection(ws, (tx, rx), manager, client).await;
                     }
+                    drop(mngr);
+                    init_client_connection(ws, (tx, rx), manager, client).await;
                 },
                 Err(e) => {
                     send(&mut ws, InitConnectionResPayload::AuthError(e)).await;

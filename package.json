@@ -12,6 +12,8 @@
   "dependencies": {
     "@tauri-apps/api": "^1",
     "bulma": "^1.0.0",
+    "marked": "^12.0.2",
+    "marked-directive": "^1.0.5",
     "vue": "^3.3.4"
   },
   "devDependencies": {

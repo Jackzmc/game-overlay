@@ -17,6 +17,11 @@ pub struct OverlayManagerInstance {
     socket: Option<WebSocket<MaybeTlsStream<TcpStream>>>
 }
 
+pub struct ClientAuthorized {
+    pub steamid2: String,
+    pub user: overlay_manager::SteamUser,
+    pub auth_token: String 
+}
 
 impl OverlayManagerInstance {
     pub fn new(url: Url) -> Self {
@@ -36,39 +41,34 @@ impl OverlayManagerInstance {
 
     // two auth procedures: first time (get url) or token
     pub fn begin_new_account(&mut self) -> Result<String, String> {
-        if self.socket.is_none() {
-            return Err("Not connected to socket".to_string());
-        }
-        let socket = self.socket.as_mut().unwrap();
-        self.send(overlay_manager::InitConnectionReqPayload::Client { auth_token: None}.into())?;
         match self._authorize(None)? {
             overlay_manager::InitConnectionResPayload::PendingClientLogin { url } => Ok(url),
             other => Err(format!("manager returned unexpected response"))
         }
     }
-    pub fn wait_for_authorized(&mut self) -> Result<overlay_manager::ClientIncomingRequest, String> {
+    pub fn wait_for_authorized(&mut self) -> Result<ClientAuthorized, String> {
         loop {
             match self.read::<overlay_manager::ClientIncomingRequest>() {
-                Ok(Some(r)) => return Ok(r),
+                Ok(Some(overlay_manager::ClientIncomingRequest::Authorized {steamid2, auth_token, user})) => {
+                    return Ok(ClientAuthorized {
+                        steamid2,
+                        user,
+                        auth_token
+                    })
+                },
+                Ok(Some(_)) => return Err("manager sent unexpected data".to_string()),
+                Err(e) => return Err(e),
                 Ok(None) => {}
-                Err(e) => return Err(e)
             }
         }
     }
+    // TODO: split Authorized out into own struct
     pub fn authorize_with_token(&mut self, auth_token: String) -> Result<(), String> {
-        if self.socket.is_none() {
-            return Err("Not connected to socket".to_string());
-        }
         self.send(overlay_manager::InitConnectionReqPayload::Client { auth_token: Some(auth_token) }.into())?;
-        match self._authorize(None)? {
-            overlay_manager::InitConnectionResPayload::ClientAuthorized => Ok(()),
-            other => Err(format!("manager returned unexpected response"))
-        }
+        Ok(())
     }
     fn _authorize(&mut self, auth_token: Option<String>) -> Result<overlay_manager::InitConnectionResPayload, String> {
-        let msg: Message = overlay_manager::InitConnectionReqPayload::Client {
-            auth_token
-        }.into();
+        self.send(overlay_manager::InitConnectionReqPayload::Client { auth_token }.into())?;
         // let start_auth = Instant::now();
         loop {
             if let Some(response) = self.read::<overlay_manager::InitConnectionResPayload>()? {
@@ -116,31 +116,31 @@ pub fn start_manager_read_thread(window: Window, manager: OverlayManager) {
             if let Some(auth_token) = keyring.get_password().ok() {
                 debug!("using stored keyring");
                 trace!("{}", auth_token);
-                manager.authorize_with_token(auth_token).expect("bad auth token")
+                manager.authorize_with_token(auth_token).expect("bad auth token");
             } else {
                 debug!("creating auth window");
                 window.hide().unwrap();
                 let url = manager.begin_new_account().expect("failed to begin new account");
                 webbrowser::open(&url).expect("could not open browser");
-                // let auth_window = WindowBuilder::new(&window.app_handle(), "auth_window", WindowUrl::External(url))
-                //     .title("Login with Steam")
-                //     .closable(false)
-                //     .disable_file_drop_handler()
-                //     .content_protected(true)
-                //     .build()
-                //     .expect("could not create auth window");
-                debug!("waiting for auth");
-                match manager.wait_for_authorized() {
-                    Ok(overlay_manager::ClientIncomingRequest::Authorized { steamid2, user, auth_token }) => {
-                        // TODO: store steamid,user
-                        debug!("Authorized! {steamid2} {}", user.persona_name);
-                        keyring.set_password(&auth_token).unwrap();
-                    },
-                    _ => panic!("unexpected manager response")
-                }
-                window.show().unwrap();
-                // auth_window.close().unwrap();
             }
+            // let auth_window = WindowBuilder::new(&window.app_handle(), "auth_window", WindowUrl::External(url))
+            //     .title("Login with Steam")
+            //     .closable(false)
+            //     .disable_file_drop_handler()
+            //     .content_protected(true)
+            //     .build()
+            //     .expect("could not create auth window");
+            debug!("waiting for auth");
+            match manager.wait_for_authorized() {
+                Ok(auth_data) => {
+                    // TODO: store steamid,user
+                    debug!("Authorized! {} {}", auth_data.steamid2, auth_data.user.persona_name);
+                    keyring.set_password(&auth_data.auth_token).unwrap();
+                },
+                _ => panic!("unexpected manager response")
+            }
+            window.show().unwrap();
+            // auth_window.close().unwrap();
         }
 
         loop {
