@@ -12,6 +12,7 @@ use tokio::sync::Mutex;
 use serde::{Deserialize, Serialize};
 use steamid_ng::SteamID;
 use tokio::sync::mpsc::UnboundedSender;
+use overlay_manager::AuthFailure;
 use crate::client::{ClientIncomingRequest, ClientInstance, ClientOutgoingEvent};
 use crate::{AppError, JWT_SECRET_KEY};
 use crate::server::{ServerInstance, ServerOutgoingEvent};
@@ -21,34 +22,7 @@ use crate::steam::{SteamClient, SteamUser};
 pub type Client = Arc<Mutex<ClientInstance>>;
 pub type Server = Arc<Mutex<ServerInstance>>;
 
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "snake_case")]
-#[serde(tag = "reason")]
-pub enum AuthFailure {
-    InvalidAuthToken(Option<String>),
-    Unknown,
-    General(String),
-    Timeout,
-    ObjectNotFound
-}
-impl Error for AuthFailure {}
 
-impl fmt::Display for AuthFailure {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            AuthFailure::General(msg) => write!(f, "{}", msg),
-            AuthFailure::InvalidAuthToken(msg) => {
-                if let Some(msg) = msg {
-                    write!(f, "{}", msg)
-                } else {
-                    write!(f, "auth token is either invalid or unauthorized")
-                }
-            },
-            AuthFailure::ObjectNotFound => write!(f, "client or server being authorized does not exist"),
-            _ => write!(f, "generic authentication failure")
-        }
-    }
-}
 #[derive(Debug)]
 pub enum RequestError {
     Disconnected,

@@ -1,9 +1,9 @@
+use std::fmt::{Display, Formatter};
 use log::debug;
-use reqwest::{Error, RequestBuilder, Response};
+use reqwest::{RequestBuilder, Response};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use steamid_ng::SteamID;
-use crate::SteamAuthError;
 
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -36,6 +36,25 @@ pub struct SteamClient {
     client: reqwest::Client,
     apikey: String
 }
+
+#[derive(Serialize, Clone, Debug)]
+pub enum SteamError {
+    OpenIdError(String),
+    OpenIdValidationFailed,
+    APIError(String)
+}
+
+impl Display for SteamError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            SteamError::OpenIdError(msg) => write!(f, "openid error: {}", msg),
+            SteamError::OpenIdValidationFailed => write!(f, "steam openid validation failed"),
+            SteamError::APIError(msg) => write!(f, "API Error: {}", msg),
+        }
+    }
+}
+
+impl std::error::Error for SteamError {}
 impl SteamClient {
     pub fn new(client: reqwest::Client, apikey: String) -> Self {
         Self {
@@ -44,9 +63,9 @@ impl SteamClient {
         }
     }
 
-    pub async fn verify_openid(&self, query: &mut OpenIDPayload) -> Result<(),SteamAuthError> {
+    pub async fn verify_openid(&self, query: &mut OpenIDPayload) -> Result<(), SteamError> {
         if let Some(error) = query.error.as_ref() {
-            return Err(SteamAuthError(error.to_string()));
+            return Err(SteamError::OpenIdError(error.to_string()));
         }
         query.mode = "check_authentication".to_string();
         let query_str = serde_qs::to_string(&query).unwrap();
@@ -54,27 +73,30 @@ impl SteamClient {
         let res = self.client.post(format!("https://steamcommunity.com/openid/login?{query_str}"))
             .header("content-length", 0)
             .send().await
-            .map_err(|e| SteamAuthError(e.to_string()))?
-            .error_for_status().map_err(|e| SteamAuthError(e.to_string()))?;
+            .map_err(|e| SteamError::APIError(e.to_string()))?
+            .error_for_status().map_err(|e| SteamError::APIError(e.to_string()))?;
         let text = res.text().await.unwrap();
         // lazy way to check, might want to properly parse it in future?
         debug!("openid response: {}", text);
         if !text.contains("valid:true") && std::env::var("STEAM_DONT_VALIDATE").is_err(){
-            return Err(SteamAuthError("Steam auth verification failed".to_string()));
+            return Err(SteamError::OpenIdValidationFailed);
         }
         Ok(())
     }
 
-    pub async fn get_user_details(&self, steamid: SteamID) -> Result<SteamUser, Error> {
+    pub async fn get_user_details(&self, steamid: SteamID) -> Result<SteamUser, SteamError> {
         let response = self.client.get(format!("https://api.steampowered.com/ISteamUser/GetPlayerSummaries/v2/?key={}&format=json&steamids={}",
             self.apikey,
             u64::from(steamid)
         ))
             .header("content-length", 0)
-            .send().await?
-            .error_for_status()?
+            .send().await
+            .map_err(|e| SteamError::APIError(e.to_string()))?
+            .error_for_status()
+            .map_err(|e| SteamError::APIError(e.to_string()))?
             .json::<SteamResponse<PlayerSummariesResponse>>()
-            .await?;
+            .await
+            .map_err(|e| SteamError::APIError(e.to_string()))?;
         let mut players = response.response.players;
         Ok(players.pop().unwrap())
     }

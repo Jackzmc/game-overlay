@@ -32,7 +32,7 @@ use uuid::Uuid;
 use serde::{Serialize,Deserialize};
 
 use crate::client::{ClientIncomingRequest, ClientOutgoingEvent};
-use crate::manager::{AuthFailure, Client, Manager, ManagerInstance, Server};
+use crate::manager::{Client, Manager, ManagerInstance, Server};
 use crate::server::{ServerIncomingRequest, ServerOutgoingEvent};
 use once_cell::sync::Lazy;
 use sha2::digest::KeyInit;
@@ -45,6 +45,7 @@ use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum_template::{RenderHtml, TemplateEngine};
 use tokio::time::timeout;
+use overlay_manager::{AuthFailure, InitConnectionReqPayload, InitConnectionResPayload};
 
 type QueryMap = HashMap<String, String>;
 static CLIENT_AUTH_TIMEOUT: Duration = Duration::from_secs(60 * 4);
@@ -196,11 +197,10 @@ async fn route_steam_callback(
     State(state): State<Arc<AppState>>
 ) -> Result<impl IntoResponse, AppError> {
     let (_,steamid2) = query.openid.identity.rsplit_once("/").unwrap();
-    debug!("raw: {}. steamid2: {}", query.openid.identity, steamid2);
     let steamid2: u64 = steamid2.parse().unwrap();
     let steamid = SteamID::from(steamid2);
     state.steam.verify_openid(&mut query.openid).await
-        .map_err(|e| AppError::GenericServerError { message: e.0 })?;
+        .map_err(|e| AppError::GenericServerError { message: e.to_string() })?;
     debug!("auth success, authorizing with manager");
     let mut manager = state.manager.lock().await;
     manager.authorize_client(&query.id, steamid.clone()).await
@@ -252,30 +252,6 @@ fn load_templates(hb: &mut Handlebars) {
         }
     }
 }
-
-#[derive(Deserialize)]
-#[serde(rename_all = "snake_case")]
-#[serde(tag = "type")]
-enum InitConnectionReqPayload {
-    Client { auth_token: Option<String> },
-    Server { auth_token: String }
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "snake_case")]
-#[serde(tag = "result")]
-enum InitConnectionResPayload {
-    PendingClientLogin { url: String },
-    ServerAuthorized,
-    InvalidPayload { message: Option<String> },
-    AuthError(AuthFailure)
-}
-impl Into<Message> for InitConnectionResPayload {
-    fn into(self) -> Message {
-        Message::Text(serde_json::to_string(&self).unwrap())
-    }
-}
-
 async fn init_connection(mut ws: WebSocket, addr: SocketAddr, manager: Manager) {
     debug!("init_connection addr={:?}", addr);
     // let (mut conn_tx, mut conn_rx) = ws.split();
@@ -310,10 +286,11 @@ async fn login_connection(mut ws: WebSocket, manager: Manager, req: InitConnecti
                 Ok((client, id)) => {
                     if let Some(token) = auth_token {
                         if let Err(err) = mngr.authorize_client_token(&id, token).await {
-                            send(&mut ws, InitConnectionResPayload::AuthError(AuthFailure::General(err.to_string()))).await;
-                        } else {
                             // Cleanup ID
+                            send(&mut ws, InitConnectionResPayload::AuthError(AuthFailure::General(err.to_string()))).await;
                             mngr.remove_client(&id);
+                        } else {
+                            send(&mut ws, InitConnectionResPayload::ClientAuthorized).await;
                         }
                     } else {
                         send(&mut ws, InitConnectionResPayload::PendingClientLogin { url: format!("{}/auth/login?id={id}", PUBLIC_URL.deref()) }).await;

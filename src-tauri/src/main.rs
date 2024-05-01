@@ -15,7 +15,7 @@ use std::time::Duration;
 use active_win_pos_rs::get_active_window;
 use tungstenite::{connect, Message};
 use log::{error, trace};
-use crate::manager::{ManagerResponse, OverlayManagerInstance, start_manager_read_thread};
+use crate::manager::{OverlayManagerInstance, start_manager_read_thread};
 
 
 #[cfg(windows)]
@@ -24,7 +24,7 @@ const TARGET_PROC_NAME: &str = "thunderbird.exe";
 #[cfg(unix)]
 // const TARGET_PROC_NAME: &str = "left4dead2";
 const TARGET_PROC_NAME: &str = "thunderbird";
-const PROCESS_CHECK_INTERVAL: u64 = 1000 * 2;
+const PROCESS_CHECK_INTERVAL: u64 = 1000 * 1;
 
 #[derive(PartialEq, serde::Serialize, Clone, Debug)]
 enum ViewState {
@@ -54,7 +54,7 @@ impl AppData {
 }
 
 fn init_data() -> AppData {
-    let url = Url::parse(&std::env::var("MANAGER_WS_URL").unwrap_or_else(|_| "ws://127.0.0.1:3011".to_string())).expect("bad MANAGER_WS_URL");
+    let url = Url::parse(&std::env::var("MANAGER_WS_URL").unwrap_or_else(|_| "ws://127.0.0.1:3011/socket".to_string())).expect("bad MANAGER_WS_URL");
     let manager = manager::OverlayManagerInstance::new(url);
     AppData::new(manager)
 }
@@ -102,10 +102,6 @@ struct ProcessDataResult {
     mem_usage: u64,
     status: String
 }
-enum ProcessData {
-    Result(ProcessDataResult),
-}
-
 fn start_process_check_thread(window: tauri::Window) {
     std::thread::spawn(move || {
         debug!("process check thread started. target process: {}", TARGET_PROC_NAME);

@@ -29,8 +29,6 @@ setInterval(() => {
 // setInterval(async () => {
 //   proc.value = await invoke("check_process")
 // }, 500)
-invoke("init_process_check")
-
 onMounted(async() => {
   await listen("manager", ({ payload }) => {
     if(payload == "ManagerDisconnected") {
