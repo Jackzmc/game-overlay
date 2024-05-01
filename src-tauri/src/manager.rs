@@ -92,9 +92,9 @@ impl OverlayManagerInstance {
         if self.socket.is_none() {
             return Err("Not connected to socket".to_string());
         }
-        let msg = self.socket.as_mut().unwrap().read().expect("Error reading message");
+        let msg = self.socket.as_mut().unwrap().read().map_err(|e| e.to_string())?;
         Ok(if msg.is_text() {
-            Some(serde_json::from_str(&msg.into_text().unwrap()).unwrap())
+            Some(serde_json::from_str(&msg.into_text().unwrap()).map_err(|e| e.to_string())?)
         } else {
             None
         })
