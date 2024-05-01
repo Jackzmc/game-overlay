@@ -1,5 +1,5 @@
 <template>
-<div class="card" ref="root" :style="style as StyleValue" @click="endDrag">
+<div class="card root" ref="root" :style="style as StyleValue" @click="endDrag">
     <header ref="header" class="card-header" :style="{cursor: editable?'move':'inherit'}" v-if="elem.title" @click="startDrag(false)" @mouseleave="dropdownActive = false">
         <p class="card-header-title">
             {{ elem.title }}
@@ -13,9 +13,9 @@
                 </button>
             </div>
             <div class="dropdown-menu" id="dropdown-menu" role="menu" v-if="dropdownActive">
-                <div class="dropdown-content">
-                <a class="dropdown-item" @click="startDrag(true)">Move</a>
-                <a class="dropdown-item" @click="contentVisible = !contentVisible">{{ contentVisible ? 'Hide Content' : 'Show Content' }}</a>
+                <div class="dropdown-content" @click="dropdownActive = false">
+                    <a class="dropdown-item" @click="startDrag(true)">Move</a>
+                    <a class="dropdown-item" @click="contentVisible = !contentVisible">{{ contentVisible ? 'Hide Content' : 'Show Content' }}</a>
                 <!-- <hr class="dropdown-divider" />
                 <a href="#" class="dropdown-item"> With a divider </a> -->
                 </div>
@@ -71,11 +71,13 @@ function onMouseMove(e: any) {
 }
 let dragStart: number | undefined
 function startDrag(force = false) {
-    if(dragging.value || (!force || !props.editable)) return
-    console.debug("startDrag")
-    dragging.value = true
-    dragStart = Date.now()
-    window.addEventListener("mousemove", onMouseMove)
+    if(dragging.value) return
+    if(force || props.editable) {
+        console.debug("startDrag")
+        dragging.value = true
+        dragStart = Date.now()
+        window.addEventListener("mousemove", onMouseMove)
+    }
 } 
 function endDrag() {
     if(!dragStart) return
@@ -86,3 +88,9 @@ function endDrag() {
     window.removeEventListener("mousemove", onMouseMove)
 }
 </script>
+
+<style scoped>
+.root {
+    min-width: 10em;
+}
+</style>
