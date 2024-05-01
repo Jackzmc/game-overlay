@@ -116,35 +116,35 @@ pub struct PlayerSummariesResponse {
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct SteamUser {
     #[serde(rename = "avatar")]
-    avatar: String,
+    pub avatar: String,
     #[serde(rename = "avatarfull")]
-    avatar_full: String,
+    pub avatar_full: String,
     #[serde(rename = "avatarhash")]
-    avatar_hash: String,
+    pub avatar_hash: String,
     #[serde(rename = "avatarmedium")]
-    avatar_medium: String,
+    pub avatar_medium: String,
     #[serde(rename = "communityvisibilitystate")]
-    community_visibility_state: i64,
+    pub community_visibility_state: i64,
     #[serde(rename = "lastlogoff")]
-    last_log_off: i64,
+    pub last_log_off: i64,
     #[serde(rename = "loccountrycode")]
-    loc_country_code: String,
+    pub loc_country_code: String,
     #[serde(rename = "locstatecode")]
-    loc_state_code: String,
+    pub loc_state_code: String,
     #[serde(rename = "personaname")]
-    persona_name: String,
+    pub persona_name: String,
     #[serde(rename = "personastate")]
-    persona_state: i64,
+    pub persona_state: i64,
     #[serde(rename = "personastateflags")]
-    persona_state_flags: i64,
+    pub persona_state_flags: i64,
     #[serde(rename = "primaryclanid")]
-    primary_clan_id: String,
+    pub primary_clan_id: String,
     #[serde(rename = "profilestate")]
-    profile_state: i64,
+    pub profile_state: i64,
     #[serde(rename = "profileurl")]
-    profile_url: String,
+    pub profile_url: String,
     #[serde(rename = "steamid")]
-    steamid: String,
+    pub steamid: String,
     #[serde(rename = "timecreated")]
-    time_created: i64,
+    pub time_created: i64,
 }

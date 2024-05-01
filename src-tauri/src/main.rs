@@ -197,8 +197,7 @@ fn start_process_check_thread(window: tauri::Window) {
             if data.view_state != ViewState::Interactable {
                 if data.view_state == ViewState::Visible && !active {
                     data.view_state = ViewState::Hidden;
-                    // window.hide().unwrap();
-                    window.close().unwrap();
+                    window.hide().unwrap();
                     debug!("app is now inactive, hiding overlay");
                 } else if data.view_state == ViewState::Hidden && active {
                     data.view_state = ViewState::Visible;

@@ -2,7 +2,7 @@ use std::net::TcpStream;
 use std::sync::{Arc, Mutex};
 use std::thread::sleep;
 use std::time::{Duration, Instant};
-use log::{debug, error, info};
+use log::{debug, error, info, trace};
 use serde::{Deserialize, Serialize};
 use serde::de::DeserializeOwned;
 use tauri::{Manager, Url, Window, WindowBuilder, WindowUrl};
@@ -39,17 +39,18 @@ impl OverlayManagerInstance {
         if self.socket.is_none() {
             return Err("Not connected to socket".to_string());
         }
+        let socket = self.socket.as_mut().unwrap();
+        self.send(overlay_manager::InitConnectionReqPayload::Client { auth_token: None}.into())?;
         match self._authorize(None)? {
             overlay_manager::InitConnectionResPayload::PendingClientLogin { url } => Ok(url),
             other => Err(format!("manager returned unexpected response"))
         }
     }
-    pub fn wait_for_authorized(&mut self) -> Result<(), String> {
+    pub fn wait_for_authorized(&mut self) -> Result<overlay_manager::ClientIncomingRequest, String> {
         loop {
-            match self.read::<overlay_manager::InitConnectionResPayload>() {
-                Ok(Some(overlay_manager::InitConnectionResPayload::ClientAuthorized)) => return Ok(()),
+            match self.read::<overlay_manager::ClientIncomingRequest>() {
+                Ok(Some(r)) => return Ok(r),
                 Ok(None) => {}
-                Ok(Some(_)) =>  panic!("manager returned unexpected response"),
                 Err(e) => return Err(e)
             }
         }
@@ -58,6 +59,7 @@ impl OverlayManagerInstance {
         if self.socket.is_none() {
             return Err("Not connected to socket".to_string());
         }
+        self.send(overlay_manager::InitConnectionReqPayload::Client { auth_token: Some(auth_token) }.into())?;
         match self._authorize(None)? {
             overlay_manager::InitConnectionResPayload::ClientAuthorized => Ok(()),
             other => Err(format!("manager returned unexpected response"))
@@ -110,19 +112,34 @@ pub fn start_manager_read_thread(window: Window, manager: OverlayManager) {
                 window.emit("manager", overlay_manager::ClientIncomingRequest::ManagerDisconnected).unwrap();
                 return;
             }
-            info!("Connected to manager successful");
+            info!("Connected to manager successfully");
             if let Some(auth_token) = keyring.get_password().ok() {
+                debug!("using stored keyring");
+                trace!("{}", auth_token);
                 manager.authorize_with_token(auth_token).expect("bad auth token")
             } else {
+                debug!("creating auth window");
                 window.hide().unwrap();
-                let url = Url::parse(&manager.begin_new_account().expect("failed to begin new account")).unwrap();
-                let auth_window = WindowBuilder::new(&window.app_handle(), "auth_window", WindowUrl::External(url))
-                    .title("Login with Steam")
-                    .closable(false)
-                    .build()
-                    .expect("could not create auth window");
-                manager.wait_for_authorized();
-                auth_window.close().unwrap();
+                let url = manager.begin_new_account().expect("failed to begin new account");
+                webbrowser::open(&url).expect("could not open browser");
+                // let auth_window = WindowBuilder::new(&window.app_handle(), "auth_window", WindowUrl::External(url))
+                //     .title("Login with Steam")
+                //     .closable(false)
+                //     .disable_file_drop_handler()
+                //     .content_protected(true)
+                //     .build()
+                //     .expect("could not create auth window");
+                debug!("waiting for auth");
+                match manager.wait_for_authorized() {
+                    Ok(overlay_manager::ClientIncomingRequest::Authorized { steamid2, user, auth_token }) => {
+                        // TODO: store steamid,user
+                        debug!("Authorized! {steamid2} {}", user.persona_name);
+                        keyring.set_password(&auth_token).unwrap();
+                    },
+                    _ => panic!("unexpected manager response")
+                }
+                window.show().unwrap();
+                // auth_window.close().unwrap();
             }
         }
 

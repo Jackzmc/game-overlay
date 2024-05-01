@@ -289,8 +289,6 @@ async fn login_connection(mut ws: WebSocket, manager: Manager, req: InitConnecti
                             // Cleanup ID
                             send(&mut ws, InitConnectionResPayload::AuthError(AuthFailure::General(err.to_string()))).await;
                             mngr.remove_client(&id);
-                        } else {
-                            send(&mut ws, InitConnectionResPayload::ClientAuthorized).await;
                         }
                     } else {
                         send(&mut ws, InitConnectionResPayload::PendingClientLogin { url: format!("{}/auth/login?id={id}", PUBLIC_URL.deref()) }).await;
