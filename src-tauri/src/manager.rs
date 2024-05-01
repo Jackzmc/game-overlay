@@ -5,9 +5,10 @@ use std::time::{Duration, Instant};
 use log::{debug, error, info};
 use serde::{Deserialize, Serialize};
 use serde::de::DeserializeOwned;
-use tauri::{Manager, Url, Window};
+use tauri::{Manager, Url, Window, WindowBuilder, WindowUrl};
 use tungstenite::stream::MaybeTlsStream;
 use tungstenite::{connect, Message, WebSocket};
+use once_cell::unsync::Lazy;
 use crate::{OverlayManager};
 use overlay_manager;
 
@@ -34,13 +35,23 @@ impl OverlayManagerInstance {
     }
 
     // two auth procedures: first time (get url) or token
-    pub fn authorize(&mut self) -> Result<String, String> {
+    pub fn begin_new_account(&mut self) -> Result<String, String> {
         if self.socket.is_none() {
             return Err("Not connected to socket".to_string());
         }
         match self._authorize(None)? {
             overlay_manager::InitConnectionResPayload::PendingClientLogin { url } => Ok(url),
             other => Err(format!("manager returned unexpected response"))
+        }
+    }
+    pub fn wait_for_authorized(&mut self) -> Result<(), String> {
+        loop {
+            match self.read::<overlay_manager::InitConnectionResPayload>() {
+                Ok(Some(overlay_manager::InitConnectionResPayload::ClientAuthorized)) => return Ok(()),
+                Ok(None) => {}
+                Ok(Some(_)) =>  panic!("manager returned unexpected response"),
+                Err(e) => return Err(e)
+            }
         }
     }
     pub fn authorize_with_token(&mut self, auth_token: String) -> Result<(), String> {
@@ -89,6 +100,7 @@ impl OverlayManagerInstance {
 }
 
 pub fn start_manager_read_thread(window: Window, manager: OverlayManager) {
+    let keyring = keyring::Entry::new("game-overlay", "steamid").unwrap();
     std::thread::spawn(move || {
         {
             debug!("Starting initial connection to manager...", );
@@ -99,7 +111,21 @@ pub fn start_manager_read_thread(window: Window, manager: OverlayManager) {
                 return;
             }
             info!("Connected to manager successful");
+            if let Some(auth_token) = keyring.get_password().ok() {
+                manager.authorize_with_token(auth_token).expect("bad auth token")
+            } else {
+                window.hide().unwrap();
+                let url = Url::parse(&manager.begin_new_account().expect("failed to begin new account")).unwrap();
+                let auth_window = WindowBuilder::new(&window.app_handle(), "auth_window", WindowUrl::External(url))
+                    .title("Login with Steam")
+                    .closable(false)
+                    .build()
+                    .expect("could not create auth window");
+                manager.wait_for_authorized();
+                auth_window.close().unwrap();
+            }
         }
+
         loop {
             let mut manager = manager.lock().unwrap();
             if let Ok(Some(response)) = manager.read::<overlay_manager::ClientIncomingRequest>() {

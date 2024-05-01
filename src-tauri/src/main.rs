@@ -6,8 +6,10 @@
 mod manager;
 
 use log::{debug, info, warn};
-use std::env;
+use std::{env, fs};
+use std::io::ErrorKind;
 use std::ops::Deref;
+use std::path::PathBuf;
 use sysinfo::{Pid, ProcessStatus, System};
 use tauri::{AppHandle, Manager, PhysicalPosition, Position, Size, State, Url, Window};
 use std::sync::{Arc, Mutex};
@@ -15,6 +17,7 @@ use std::time::Duration;
 use active_win_pos_rs::get_active_window;
 use tungstenite::{connect, Message};
 use log::{error, trace};
+use serde::{Deserialize, Serialize};
 use crate::manager::{OverlayManagerInstance, start_manager_read_thread};
 
 
@@ -38,18 +41,55 @@ pub type OverlayManager = Arc<Mutex<OverlayManagerInstance>>;
 struct AppData {
     sys: System,
     view_state: ViewState,
-    manager: OverlayManager
+    manager: OverlayManager,
+    config_file_path: PathBuf,
+    config: AppConfig
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct AppConfig {
+}
+impl AppConfig {
+    pub fn new() -> Self {
+        Self {
+            
+        }
+    }
 }
 
 impl AppData {
     pub fn new(manager_inst: OverlayManagerInstance) -> Self {
         let mut sys = System::new();
         sys.refresh_processes();
+        let config_path = tauri::api::path::config_dir().unwrap().join("config.json");
+        let config = AppData::load(&config_path);
         Self {
             sys,
             view_state: ViewState::Hidden,
-            manager: Arc::new(Mutex::new(manager_inst))
+            manager: Arc::new(Mutex::new(manager_inst)),
+            config_file_path: config_path,
+            config
         }
+    }
+
+    fn load(path: &PathBuf) -> AppConfig {
+        match fs::read_to_string(path) {
+            Ok(out) => {
+                serde_json::from_str(&out).expect("bad JSON data")
+            },
+            Err(e) => {
+                if e.kind() == ErrorKind::NotFound {
+                    AppConfig::new()
+                } else {
+                    panic!("could not read config file at {:?}: {}", path, e)
+                }
+            }
+        }
+    }
+
+    fn save(&mut self) {
+        let json = serde_json::to_string(&self.config).expect("could not serialize JSON");
+        fs::write(&self.config_file_path, json).expect("could not save JSON")
     }
 }
 
@@ -70,6 +110,8 @@ fn main() {
     let manager = data.manager.clone();
     let data = Mutex::new(data);
 
+    // TODO: add token storage
+
     tauri::Builder::default()
         .setup(|app| {
             let main_window = app.get_window("main").unwrap();
@@ -82,6 +124,15 @@ fn main() {
             main_window.set_size(Size::from(monitor.size().to_owned())).unwrap();
             main_window.set_position(Position::Physical(PhysicalPosition { x: 0, y: 0 })).unwrap();
             {
+                // TODO: process
+                /*
+                    1. manager connect
+                    2. grab auth token from store, if available
+                        -> if available, send client + auth
+                        -> else, send client + open new window (WindowBuilder), do auth there
+                        -> once manager reads auth, store data.
+                
+                 */
                 start_manager_read_thread(main_window.clone(), manager);
                 start_process_check_thread(main_window.clone());
             }
