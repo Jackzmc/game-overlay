@@ -2,11 +2,11 @@
 <div :class="{'interact-overlay': store.interactable}">
   <div class="toggle-edit-box">
     <div class="buttons">
-      <button @click="store.interactable = !store.interactable">
-        {{ store.interactable ? 'Stop Interact' : 'Interact' }}
+      <button @click="store.editable = !store.editable" v-if="store.interactable" :class="['button',{'is-info': store.editable}]">
+        <Icon icon="fa-pencil"><template #default v-if="store.editable">Edit Active</template></Icon>
       </button>
-      <button @click="store.editable = !store.editable" v-if="store.interactable">
-        {{ store.editable ? 'Stop Move' : 'Move Elements' }}
+      <button @click="store.interactable = !store.interactable" class="button">
+        {{ store.interactable ? 'Stop Interact' : 'Interact' }}
       </button>
     </div>
   </div>
@@ -213,8 +213,6 @@ onUnmounted(async() => {
 <style scoped>
 .toggle-edit-box {
   position: fixed;
-  background-color: white;
-  border: 1px solid black;
   top: 0;
   left: 0;
   padding: 10px;
