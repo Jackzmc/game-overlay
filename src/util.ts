@@ -12,6 +12,15 @@ export function parseMarkdown(content: string) {
     const clean = DOMPurify.sanitize(content)
     return marked.parse(clean)
 }
+export function replaceVariables(content: string, variables: Record<string, string|number|boolean>) {
+    return Object.entries(variables)
+      .reduce((acc, [key, value]) => {
+        let replacement: string
+        if(typeof(value) === "boolean") replacement = value ? 'Yes' : 'No'
+        else replacement = String(value)
+        return acc.replace(new RegExp(`%${key}%`, 'g'), replacement)
+      }, content)
+}
 
 export function shouldUseDarkTextParts(r: number, g: number, b: number, a = 1.0) {
   const brightness = r * 0.299 + g * 0.587 + b * 0.114 + (1 - a) * 255;

@@ -11,14 +11,6 @@
         </button>
       </div>
     </div>
-    <div class="box rbox">
-      <h1>Time: {{ time }}</h1>
-      {{ interactable }}
-    </div>
-
-    <div class="box rbox procbox" v-if="proc">
-      {{ JSON.stringify(proc, null, 2) }}
-    </div>
   </div>
   <div ref="elementsContainer">
     <component v-for="(elem, id) in elementRegistry" :key="id" 
@@ -36,15 +28,17 @@
 <script setup lang="ts">
 import { invoke } from '@tauri-apps/api'
 import { emit, listen } from '@tauri-apps/api/event'
-import { markRaw, onMounted, onUnmounted, ref, shallowRef } from 'vue'
+import { inject, markRaw, onMounted, onUnmounted, provide, ref, shallowRef } from 'vue'
 import { register, unregisterAll } from '@tauri-apps/api/globalShortcut';
-import { ElemType, ElemVisibility, ElementState, UIElement } from './types.ts';
+import { ElemType, ElemVisibility, ElementState, ManagerResponse, UIElement } from './types.ts';
 
 import ListElement from './components/elements/ListElement.vue';
 import TextElement from './components/elements/TextElement.vue';
 import { ActionFlags } from './types';
+import { useGlobalState } from './store/state.ts';
 
 const TAURI_AVAILABLE = window.__TAURI_METADATA__ != undefined
+const store = useGlobalState()
 
 
 let interactable = ref(false)
@@ -56,6 +50,8 @@ interface ElementData {
   component: any,
   element: UIElement
 }
+
+// TODO: add vuex/pinia, for global variable injections
 
 let elementStates = ref<Record<string, ElementState>>({})
 let elementRegistry = ref<Record<string, ElementData>>({})
@@ -75,7 +71,7 @@ function test() {
       position:{ x: 20, y: 15 },
     },
     title: "test",
-    text: "blah blah blah blah blah",
+    text: "blah blah blah blah blah. hi the time is %time%",
     visibility: ElemVisibility.DisplayOnly
   }
   elements["test2"] = {
@@ -136,8 +132,7 @@ function updatePos(id: string, x: number, y: number) {
 }
 
 setInterval(() => {
-  const d = new Date()
-  time.value = d.toLocaleTimeString()
+  store.updateTime()
 }, 1000)
 
 
@@ -164,10 +159,7 @@ onMounted(async() => {
   // render()
   if(TAURI_AVAILABLE) {
     await listen("manager", ({ payload }) => {
-      if(payload == "ManagerDisconnected") {
-
-      }
-      console.debug("manager", payload)
+      onManagerData(payload as ManagerResponse)
     })
     await listen("process", ({payload}) => {
       proc.value = payload
@@ -189,6 +181,15 @@ onMounted(async() => {
   console.info("Mount done")
 
 })
+
+function onManagerData(payload: ManagerResponse) {
+  switch(payload.type) {
+    case "authorized": {
+      store.authorize(payload.steamid2, payload.user)
+      break;
+    }
+  }
+}
 onUnmounted(async() => {
   // saveElements()
   if(TAURI_AVAILABLE) {

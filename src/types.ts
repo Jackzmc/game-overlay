@@ -74,3 +74,16 @@ const test: ListElement = {
         }
     ]
 }
+
+export type ManagerResponseType = "manager_disconnected" | "client_joined" | "client_disconnected" | "game_data" | "authorized"
+interface ManagerResponseBase {
+    // type: ManagerResponseType
+}
+export interface ManagerResponseAuthorized extends ManagerResponseBase {
+    type: "authorized",
+    steamid2: string,
+    auth_token: string,
+    user: any //SteamUser
+}
+
+export type ManagerResponse = ManagerResponseAuthorized

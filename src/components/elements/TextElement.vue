@@ -8,8 +8,11 @@
 import BaseElement from './BaseElement.vue';
 import { ElementState, TextElement } from '../../types.ts';
 
-import { parseMarkdown } from '../../util.ts'
-import { computed, onMounted, ref, watch } from 'vue';
+import { parseMarkdown, replaceVariables } from '../../util.ts'
+import { computed, inject, onMounted, ref, watch } from 'vue';
+import { useGlobalState } from '../../store/state.ts';
+
+const store = useGlobalState()
 
 const emit = defineEmits<{
   (e: 'pos', x: number, y: number): void
@@ -24,13 +27,15 @@ const props = defineProps<{
 
 }>()
 async function computeContent() {
-    content.value = await parseMarkdown(props.elem.text)
+    const text = replaceVariables(props.elem.text, store.variables)
+    content.value = await parseMarkdown(text)
 }
 
 function updatePos(x: number, y: number) {
     emit("pos", x, y)
 }
 
+watch(() => store.variables, computeContent)
 watch(() => props.elem.text, computeContent)
 onMounted(() => computeContent())
 </script>

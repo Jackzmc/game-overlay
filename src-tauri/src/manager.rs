@@ -136,9 +136,15 @@ pub fn start_manager_read_thread(window: Window, manager: OverlayManager) {
                     // TODO: store steamid,user
                     debug!("Authorized! {} {}", auth_data.steamid2, auth_data.user.persona_name);
                     keyring.set_password(&auth_data.auth_token).unwrap();
+                    window.emit("manager", overlay_manager::ClientIncomingRequest::Authorized {
+                        steamid2: auth_data.steamid2,
+                        auth_token: auth_data.auth_token,
+                        user: auth_data.user,
+                    }).unwrap();
                 },
                 _ => panic!("unexpected manager response")
             }
+
             window.show().unwrap();
             // auth_window.close().unwrap();
         }
