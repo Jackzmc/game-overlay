@@ -1,9 +1,9 @@
 <template>
-<div class="card root" ref="root" :style="style as StyleValue"@mouseleave="dropdownActive = false">
+<div class="card root" ref="root" :style="style as StyleValue" @mouseleave="dropdownActive = false;colorPickerActive=false">
     <header ref="header" class="card-header" :style="{cursor: store.editable?'move':'inherit'}" v-if="elem.title&&store.interactable" @mousedown="startDrag(false)" >
         <p :class="['card-header-title',textColorClass]">
             {{ elem.title }}
-            <span v-if="store.editable" class="tag ml-1" style="font-size:12px"> {{ size.width }}x{{ size.height }}</span>
+            <span v-if="store.editable" class="tag ml-2" style="font-size:12px"> {{ size.width }}x{{ size.height }}</span>
         </p>
         <div v-if="store.interactable" :class="['card-header-icon','dropdown','is-right',{'is-active': dropdownActive || colorPickerActive}]">
             <div class="dropdown-trigger"   @click.prevent="dropdownActive = !dropdownActive">
@@ -13,13 +13,16 @@
             </div>
             <div class="dropdown-menu"role="menu">
                 <div class="dropdown-content" @click="dropdownActive = false">
-                    <a class="dropdown-item" @click="startDrag(true)">Move</a>
-                    <a class="dropdown-item" @click="contentVisible = !contentVisible">{{ contentVisible ? 'Hide Content' : 'Show Content' }}</a>
-                    <a class="dropdown-item" @click="colorPickerActive = !colorPickerActive">
-                        Change Color
-                        <span class="bd-color-swatch is-rounded" :style="contentStyle"></span>
-                    </a>
-                    <hr class="dropdown-divider" />
+                    <template v-if="!store.editable">
+                        <!-- Don't show when editing as the 'move' feature causes issues -->
+                        <a class="dropdown-item" @click="startDrag(true)">Move</a>
+                        <a class="dropdown-item" @click="contentVisible = !contentVisible">{{ contentVisible ? 'Hide Content' : 'Show Content' }}</a>
+                        <a class="dropdown-item" @click="colorPickerActive = !colorPickerActive">
+                            Change Color
+                            <span class="bd-color-swatch is-rounded" :style="contentStyle"></span>
+                        </a>
+                        <hr class="dropdown-divider" />
+                    </template>
                     <a href="#" class="dropdown-item" @click="emit('state', '_reset', '*')">Reset</a>
                     <ColorPicker v-if="colorPickerActive" @choose="color => emit('state', 'bgColor', color)" />
                 </div>
@@ -28,6 +31,7 @@
     </header>
     <div ref="body" :class="['card-body',contentClass??'card-content',textColorClass]" :style="contentStyle" v-if="contentVisible">
         <slot></slot>
+        <br>
     </div>
     <div class="resize-element-container">
         <div class="resize-element" v-if="store.interactable&&store.editable" @mousedown="onResizeStart" @mouseup="onResizeStop">
