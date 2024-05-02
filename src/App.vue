@@ -65,8 +65,8 @@ function test() {
     defaults: {
       position:{ x: 20, y: 15 },
     },
-    title: "test",
-    text: "blah blah blah blah blah. hi the time is %time%",
+    title: "Variable test",
+    text: "* Time: %time%\n* Date: %date%\n* Hello %name%, your steamid is %steamid%\n* You are on: %server% (%serverip%)",
     visibility: ElemVisibility.DisplayOnly
   }
   elements["test2"] = {

@@ -7,14 +7,20 @@ export const useGlobalState = defineStore('state', {
         time: "",
         date: "",
 
-        steamid: "",
-        steamUser: ""
+        steamid: null,
+        steamUser: null,
+        serverAddr: { ip: null, port: null },
+        serverName: ""
     }),
     getters: {
       variables: (state) => {
         return {
           time: state.time,
-          date: state.date
+          date: state.date,
+          steamid: state.steamid ?? "[Unauthorized]",
+          name: state.steamUser?.personaname ?? state.steamid ?? "Unknown",
+          server: state.serverName,
+          serverip: `${state.serverAddr.ip}:${state.serverAddr.port}`
         }
       }
     },

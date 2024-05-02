@@ -3,6 +3,7 @@
     <header ref="header" class="card-header" :style="{cursor: store.editable?'move':'inherit'}" v-if="elem.title&&store.interactable" @mousedown="startDrag(false)" >
         <p :class="['card-header-title',textColorClass]">
             {{ elem.title }}
+            <span v-if="store.editable" class="tag ml-1" style="font-size:12px"> {{ size.width }}x{{ size.height }}</span>
         </p>
         <div v-if="store.interactable" :class="['card-header-icon','dropdown','is-right',{'is-active': dropdownActive || colorPickerActive}]">
             <div class="dropdown-trigger"   @click.prevent="dropdownActive = !dropdownActive">
@@ -27,7 +28,6 @@
     </header>
     <div ref="body" :class="['card-body',contentClass??'card-content',textColorClass]" :style="contentStyle" v-if="contentVisible">
         <slot></slot>
-        {{ getState('size', { width: 0, height: 0}) }}
     </div>
     <div class="resize-element-container">
         <div class="resize-element" v-if="store.interactable&&store.editable" @mousedown="onResizeStart" @mouseup="onResizeStop">
@@ -77,14 +77,12 @@ function getState(key: keyof ElementState, defaultValue: any) {
     return value ?? defaultValue
 }
 
+const size = computed(() => {
+    return getState("size", { width: 300, height: 400 })
+})
+
 const style = computed(() => {
-    const size = getState("size", { width: 300, height: 400 })
     const pos = getState("position", { x: 40, y: 40})
-    console.log({
-        size: Object.assign({}, size), 
-        body: { width: document.documentElement.clientWidth, height: document.documentElement.clientHeight }
-    })
-    // console.log(Math.min(size.width, document.documentElement.clientWidth), Math.min(size.height, document.documentElement.clientHeight))
     return {
         'background-color': colorToCSS(bgColor.value),
         display: dragging.value ? "hidden" : "block",
@@ -100,11 +98,11 @@ const style = computed(() => {
 })
 
 const contentStyle = computed(() => {
-    const size = getState("size", { width: 200, height: 200 })
+    // const size = getState("size", { width: 200, height: 200 })
     return {
         'background-color': colorToCSS(bgColor.value),
-        width: size.width + "px",
-        height: size.height + "px"
+        width: size.value.width + "px",
+        height: size.value.height + "px"
     }
 })
 
@@ -188,6 +186,7 @@ function onResizeStop(e: any) {
 .card-header {
     border-bottom: 2px solid rgb(151, 150, 150);
     margin-bottom: 0;
+    user-select: none;
 }
 .card-header-title {
     padding: 8px;
