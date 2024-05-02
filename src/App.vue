@@ -1,6 +1,16 @@
 <template>
 <div>
   <div :class="['container',{'interact-overlay': interactable}]">
+    <div class="toggle-edit-box">
+      <div class="buttons">
+        <button @click="interactable = !interactable">
+          {{ interactable ? 'Stop Interact' : 'Interact' }}
+        </button>
+        <button @click="editable = !editable" v-if="interactable">
+          {{ editable ? 'Stop Move' : 'Move Elements' }}
+        </button>
+      </div>
+    </div>
     <div class="box rbox">
       <h1>Time: {{ time }}</h1>
       {{ interactable }}
@@ -15,6 +25,8 @@
       :is="elem.component" 
       :elem="elem.element" 
       :state="elementStates[id]"
+      :editable="editable"
+      :interactable="interactable"
       @pos="(x: number, y: number) => updatePos(id, x, y)"
     />
   </div>
@@ -26,15 +38,17 @@ import { invoke } from '@tauri-apps/api'
 import { emit, listen } from '@tauri-apps/api/event'
 import { markRaw, onMounted, onUnmounted, ref, shallowRef } from 'vue'
 import { register, unregisterAll } from '@tauri-apps/api/globalShortcut';
-import { ElemType, ElementState, UIElement } from './types.ts';
+import { ElemType, ElemVisibility, ElementState, UIElement } from './types.ts';
 
 import ListElement from './components/elements/ListElement.vue';
 import TextElement from './components/elements/TextElement.vue';
+import { ActionFlags } from './types';
 
 const TAURI_AVAILABLE = window.__TAURI_METADATA__ != undefined
 
 
 let interactable = ref(false)
+let editable = ref(false)
 let time = ref()
 let proc = ref()
 
@@ -46,13 +60,6 @@ interface ElementData {
 let elementStates = ref<Record<string, ElementState>>({})
 let elementRegistry = ref<Record<string, ElementData>>({})
 let elementsContainer = ref()
-// async function render() {
-//   const ordered = Object.values(elements.value).sort((a, b) => (b.zIndex??0) - (a.zIndex??0))
-//   for(const elem of ordered) {
-//     const div = createElement(elem)
-//     elementsContainer.value.appendChild(div)
-//   }
-// }
 
 const ELEM_TYPE_MAP: Record<ElemType, any> = markRaw({
   "list": ListElement,
@@ -64,21 +71,29 @@ function test() {
   elements["test"] = {
     id: "test",
     type: "text",
-    defaultPosition: { x: 20, y: 15 },
+    defaults: {
+      position:{ x: 20, y: 15 },
+    },
     title: "test",
-    text: "blah blah blah blah blah"
+    text: "blah blah blah blah blah",
+    visibility: ElemVisibility.DisplayOnly
   }
   elements["test2"] = {
     id: "test",
     type: "text",
-    defaultPosition: { x: 5, y: 250 },
+    defaults: {
+      bgColor: { r: 120, g: 255, b: 255 },
+      position: { x: 5, y: 250 },
+    },
     title: "test",
     text: "# markdown test\n**blah** blah blah\nlorem ipsum dolor sit amet"
   }
   elements["list"] = {
     "id": "list",
     "type": "list",
-    "defaultPosition": { x: 400, y: 10 },
+    defaults: {
+      position: { x: 400, y: 10 }
+    },
     title: "My List",
     list: [
       {
@@ -91,7 +106,23 @@ function test() {
       },
       {
         "title": "Element 3",
-        content: "Blah blah blah. But longer. Blah blah."
+        content: "Blah blah blah. But longer. Blah blah.",
+        actions: [
+          {
+            "label": "Kick Player",
+            "action": "kick #5235"
+          },
+          {
+            "label": "Ban Player",
+            "action": "ban #5235",
+            "bgColor": { r: 255, g: 120, b: 50, a: 1 },
+            flags: ActionFlags.RequireConfirmation
+          },
+          {
+            "label": "Add Note",
+            "action": "note #STEAM_##"
+          }
+        ]
       }
     ]
   }
@@ -167,6 +198,14 @@ onUnmounted(async() => {
 </script>
 
 <style scoped>
+.toggle-edit-box {
+  position: fixed;
+  background-color: white;
+  border: 1px solid black;
+  top: 0;
+  left: 0;
+  padding: 10px;
+}
 .procbox {
   position: fixed;
   bottom: 0;

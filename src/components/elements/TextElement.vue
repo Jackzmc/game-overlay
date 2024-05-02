@@ -1,5 +1,5 @@
 <template>
-<BaseElement :elem="elem" :state="state" @pos="updatePos">
+<BaseElement :elem="elem" :state="state" :editable="editable" :interactable="interactable" @pos="updatePos">
     <span class="content" v-html="content" />
 </BaseElement>
 </template>
@@ -18,7 +18,10 @@ const emit = defineEmits<{
 let content = ref<string>()
 const props = defineProps<{
     elem: TextElement,
-    state?: ElementState
+    state?: ElementState,
+    editable?: boolean,
+    interactable?: boolean
+
 }>()
 async function computeContent() {
     content.value = await parseMarkdown(props.elem.text)
@@ -31,3 +34,9 @@ function updatePos(x: number, y: number) {
 watch(() => props.elem.text, computeContent)
 onMounted(() => computeContent())
 </script>
+
+<style scoped>
+.card-content {
+    padding: 0;
+}
+</style>
