@@ -140,7 +140,7 @@ fn main() {
             Ok(())
         })
         .manage(data)
-        .invoke_handler(tauri::generate_handler![init_login, overlay_key])
+        .invoke_handler(tauri::generate_handler![init_login, overlay_key, perform_action])
         .run(context)
         .expect("error while running tauri application");
 }
@@ -240,4 +240,9 @@ fn overlay_key(window: Window, data: State<Mutex<AppData>>) -> bool {
         window.set_ignore_cursor_events(false).unwrap();
         true
     }
+}
+
+#[tauri::command]
+fn perform_action(action: String) -> Result<String, String> {
+    Err("not implemented".to_string())
 }

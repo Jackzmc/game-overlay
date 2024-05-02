@@ -1,10 +1,10 @@
 <template>
-<BaseElement :elem="elem" :state="state" :editable="editable" :interactable="interactable" @pos="updatePos" content-class="">
+<BaseElement :elem="elem" :state="state" @state="updateState" content-class="">
     <ul>
-        <li v-for="(entry, i) in elem.list" :key="i" class="box mx-0 my-0">
+        <li v-for="(entry, i) in elem.list" :key="i" class="list-item mx-0 my-0">
             <h5 class="title is-5 mb-0">{{ entry.title }}</h5>
             <span class="content" v-html="parseMarkdown(entry.content)"></span>
-            <div class="buttons mt-2" v-if="entry.actions && interactable">
+            <div class="buttons mt-2" v-if="entry.actions && store.interactable">
                 <ActionButton v-for="(action, i) in entry.actions" :key="i" :action="action">
                     {{ action.label }}
                 </ActionButton>
@@ -17,21 +17,29 @@
 <script setup lang="ts">
 import BaseElement from './BaseElement.vue';
 import ActionButton from '../ActionButton.vue';
-import { ElementState, ListElement } from '../../types.ts';
+import { ElementState, ListElement, StateKeys } from '../../types.ts';
 import { parseMarkdown } from '../../util.ts';
+import { useGlobalState } from '../../store/state.ts';
+
+const store = useGlobalState()
 
 const emit = defineEmits<{
-  (e: 'pos', x: number, y: number): void
+  (e: 'state', key: StateKeys, value: any): void
 }>()
 
 const props = defineProps<{
     elem: ListElement,
     state?: ElementState,
-    editable?: boolean,
-    interactable?: boolean
 }>()
 
-function updatePos(x: number, y: number) {
-    emit("pos", x, y)
+function updateState(key: StateKeys, value: any) {
+    emit("state", key, value)
 }
 </script>
+
+<style scoped>
+.list-item {
+    padding: 10px;
+    border-bottom: 0.1px solid lightgray;
+}
+</style>

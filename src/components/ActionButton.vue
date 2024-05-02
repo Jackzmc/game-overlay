@@ -17,6 +17,7 @@
 import { computed, ref } from 'vue';
 import { Action, ActionFlags } from '../types';
 import { colorToCSS } from '../util.ts';
+import { invoke } from '@tauri-apps/api'
 
 const props = defineProps<{
     action: Action
@@ -31,7 +32,7 @@ const style = computed(() => {
 enum State { None, Confirmation, Loading }
 let state = ref<State>(State.None)
 
-function performAction(force = false) {
+async function performAction(force = false) {
     if(state.value === State.Loading) return
     console.debug(Object.assign({}, props.action))
     if(!force && props.action.flags && (props.action.flags & ActionFlags.RequireConfirmation)) {
@@ -39,9 +40,12 @@ function performAction(force = false) {
         return
     }
     state.value = State.Loading
-    console.debug("action performed")
-    setTimeout(() => {
+    try {
+        await invoke("perform_action", { action: props.action.action })
         state.value = State.None
-    }, 2000)
+    } catch(err) {
+        // TODO: replace with modal or popup
+        alert("Action failed: " + (err as any).message)
+    }
 }
 </script>

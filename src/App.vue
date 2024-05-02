@@ -1,15 +1,13 @@
 <template>
-<div>
-  <div :class="['container',{'interact-overlay': interactable}]">
-    <div class="toggle-edit-box">
-      <div class="buttons">
-        <button @click="interactable = !interactable">
-          {{ interactable ? 'Stop Interact' : 'Interact' }}
-        </button>
-        <button @click="editable = !editable" v-if="interactable">
-          {{ editable ? 'Stop Move' : 'Move Elements' }}
-        </button>
-      </div>
+<div :class="{'interact-overlay': store.interactable}">
+  <div class="toggle-edit-box">
+    <div class="buttons">
+      <button @click="store.interactable = !store.interactable">
+        {{ store.interactable ? 'Stop Interact' : 'Interact' }}
+      </button>
+      <button @click="store.editable = !store.editable" v-if="store.interactable">
+        {{ store.editable ? 'Stop Move' : 'Move Elements' }}
+      </button>
     </div>
   </div>
   <div ref="elementsContainer">
@@ -17,11 +15,10 @@
       :is="elem.component" 
       :elem="elem.element" 
       :state="elementStates[id]"
-      :editable="editable"
-      :interactable="interactable"
-      @pos="(x: number, y: number) => updatePos(id, x, y)"
+      @state="(key: keyof ElementState, value: any) => updateState(id, key, value)"
     />
   </div>
+
 </div>
 </template>
 
@@ -30,7 +27,7 @@ import { invoke } from '@tauri-apps/api'
 import { emit, listen } from '@tauri-apps/api/event'
 import { inject, markRaw, onMounted, onUnmounted, provide, ref, shallowRef } from 'vue'
 import { register, unregisterAll } from '@tauri-apps/api/globalShortcut';
-import { ElemType, ElemVisibility, ElementState, ManagerResponse, UIElement } from './types.ts';
+import { ElemType, ElemVisibility, ElementState, ManagerResponse, StateKeys, UIElement } from './types.ts';
 
 import ListElement from './components/elements/ListElement.vue';
 import TextElement from './components/elements/TextElement.vue';
@@ -41,8 +38,6 @@ const TAURI_AVAILABLE = window.__TAURI_METADATA__ != undefined
 const store = useGlobalState()
 
 
-let interactable = ref(false)
-let editable = ref(false)
 let time = ref()
 let proc = ref()
 
@@ -83,6 +78,17 @@ function test() {
     },
     title: "test",
     text: "# markdown test\n**blah** blah blah\nlorem ipsum dolor sit amet"
+  }
+  elements["big_list"] = {
+    id: "big_list",
+    type: "list",
+    title: "Big List",
+    list: Array(15).fill(undefined).map((_, i) => {
+      return {
+        "title": `Element ${i}`,
+        content: "Blah blah blah"
+      }
+    })
   }
   elements["list"] = {
     "id": "list",
@@ -125,9 +131,14 @@ function test() {
   return elements
 }
 
-function updatePos(id: string, x: number, y: number) {
-  if(!elementStates.value[id]) elementStates.value[id] = {}
-  elementStates.value[id].position = { x, y }
+function updateState(id: string, key: StateKeys, value: any) {
+  if(key === "_reset") {
+    if(value == "*") elementStates.value[id] = {}
+    else delete elementStates.value[id][value as keyof ElementState]
+  } else {
+    if(!elementStates.value[id]) elementStates.value[id] = {}
+    elementStates.value[id][key] = value
+  }
   saveElements()
 }
 
@@ -165,9 +176,9 @@ onMounted(async() => {
       proc.value = payload
     })
     await register('Control+Shift+G', async() => {
-      interactable.value = await invoke("overlay_key")
+      store.interactable = await invoke("overlay_key")
       const r: HTMLElement = document.querySelector(':root')!;
-      if(interactable.value) {
+      if(store.interactable) {
         document.body.classList.add("interact-overlay")
         r.style.setProperty("--opacity", "1.0")
       } else {

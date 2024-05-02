@@ -1,4 +1,5 @@
 export interface Position { x: number, y: number}
+export interface Size { width: number, height: number}
 export interface Color { r: number, g: number, b: number, a?: number }
 export type ElemType = "text" | "list"
 export enum ElemFlags {
@@ -50,10 +51,12 @@ export interface Action {
 
 export interface ElementState {
     position?: Position,
-    bgColor?: Color
+    bgColor?: Color,
+    size?: Size
 }
 
 export type UIElement = TextElement | ListElement
+export type StateKeys = keyof ElementState | "_reset"
 
 const test: ListElement = {
     id: "test",

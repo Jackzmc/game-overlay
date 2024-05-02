@@ -24,7 +24,7 @@
 <script setup lang="ts">
 const emit = defineEmits(["cancel", "confirm"])
 const props = defineProps<{
-    title: string,
+    title?: string,
     type?: "is-warning" | "is-danger" | "is-success" | "is-info"
 }>()
 </script>
