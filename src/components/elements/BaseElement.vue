@@ -7,7 +7,7 @@
         <div v-if="store.interactable" :class="['card-header-icon','dropdown','is-right',{'is-active': dropdownActive || colorPickerActive}]">
             <div class="dropdown-trigger"   @click.prevent="dropdownActive = !dropdownActive">
                 <button class="" aria-haspopup="true" aria-controls="dropdown-menu">
-                <Icon icon="fa-ellipsis" />
+                    <Icon icon="fa-ellipsis" />
                 </button>
             </div>
             <div class="dropdown-menu"role="menu">
@@ -178,9 +178,19 @@ function onResizeStop(e: any) {
     overflow-x: clip;
     min-width: fit-content;
     min-height: fit-content;
-    padding: 5px;
+    padding: 8px;
     border-radius: 0;
     /* max-height: 10vh; */
+}
+.card {
+    border-radius: 0;
+}
+.card-header {
+    border-bottom: 2px solid rgb(151, 150, 150);
+    margin-bottom: 0;
+}
+.card-header-title {
+    padding: 8px;
 }
 .dropdown {
     overflow-y: visible;
