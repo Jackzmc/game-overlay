@@ -182,6 +182,7 @@ onMounted(async() => {
         document.body.classList.add("interact-overlay")
         r.style.setProperty("--opacity", "1.0")
       } else {
+        store.editable = false
         document.body.classList.remove("interact-overlay")
         r.style.setProperty("--opacity", "0.5")
       }

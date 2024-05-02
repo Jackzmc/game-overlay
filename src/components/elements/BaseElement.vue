@@ -1,6 +1,6 @@
 <template>
 <div class="card root" ref="root" :style="style as StyleValue"@mouseleave="dropdownActive = false">
-    <header ref="header" class="card-header" :style="{cursor: store.editable?'move':'inherit'}" v-if="elem.title" @mousedown="startDrag(false)" >
+    <header ref="header" class="card-header" :style="{cursor: store.editable?'move':'inherit'}" v-if="elem.title&&store.interactable" @mousedown="startDrag(false)" >
         <p :class="['card-header-title',textColorClass]">
             {{ elem.title }}
         </p>
@@ -30,7 +30,7 @@
         {{ getState('size', { width: 0, height: 0}) }}
     </div>
     <div class="resize-element-container">
-        <div class="resize-element" v-if="store.editable" @mousedown="onResizeStart" @mouseup="onResizeStop">
+        <div class="resize-element" v-if="store.interactable&&store.editable" @mousedown="onResizeStart" @mouseup="onResizeStop">
             <Icon icon="fa-solid fa-up-right-and-down-left-from-center" rotate=90 />
         </div>
     </div>
@@ -155,8 +155,8 @@ function onResize(e: any) {
     console.log(`Math.max(Math.min(${distance[0]}, ${document.body.clientWidth - position.x}), ${300})`)
     console.log(`Math.max(Math.min(${distance[1]}, ${document.body.clientHeight - position.y}), ${150})`)
     const size = {
-        width: Math.max(distance[0], 300),
-        height: Math.max(distance[1], 150)
+        width: Math.max(distance[0], 250),
+        height: Math.max(distance[1], 100)
     }
     console.log("distance", size)
     emit("state", "size", size)
@@ -170,14 +170,16 @@ function onResizeStop(e: any) {
 
 <style scoped>
 .root {
-    min-width: 13em;
-    min-height: 5rem;
+    min-width: 11em;
+    min-height: 3rem;
 }
 .card-body {
     overflow-y: auto;
     overflow-x: clip;
     min-width: fit-content;
     min-height: fit-content;
+    padding: 5px;
+    border-radius: 0;
     /* max-height: 10vh; */
 }
 .dropdown {

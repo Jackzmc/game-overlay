@@ -2,7 +2,7 @@
 <BaseElement :elem="elem" :state="state" @state="updateState" content-class="">
     <ul>
         <li v-for="(entry, i) in elem.list" :key="i" class="list-item mx-0 my-0">
-            <h5 class="title is-5 mb-0">{{ entry.title }}</h5>
+            <h6 class="title is-6 mb-0">{{ entry.title }}</h6>
             <span class="content" v-html="parseMarkdown(entry.content)"></span>
             <div class="buttons mt-2" v-if="entry.actions && store.interactable">
                 <ActionButton v-for="(action, i) in entry.actions" :key="i" :action="action">
@@ -39,7 +39,7 @@ function updateState(key: StateKeys, value: any) {
 
 <style scoped>
 .list-item {
-    padding: 10px;
+    padding: 5px;
     border-bottom: 0.1px solid lightgray;
 }
 </style>
