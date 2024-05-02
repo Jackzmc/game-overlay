@@ -45,6 +45,7 @@ async function performAction(force = false) {
         state.value = State.None
     } catch(err) {
         // TODO: replace with modal or popup
+        state.value = State.None
         alert("Action failed: " + (err as any).message)
     }
 }
