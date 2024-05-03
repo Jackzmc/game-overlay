@@ -36,6 +36,7 @@
     </header>
     <div ref="body" :class="['card-body',contentClass??'card-content',textColorClass,{'can-scroll': store.interactable}]" :style="contentStyle" v-if="isVisibleContent">
         <slot></slot>
+        <br>
     </div>
     <div class="resize-element-container">
         <div class="resize-element" v-if="store.interactable&&store.editable" @mousedown="onResizeStart" @mouseup="onResizeStop">
