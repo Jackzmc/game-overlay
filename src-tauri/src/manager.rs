@@ -12,31 +12,50 @@ use once_cell::unsync::Lazy;
 use crate::{OverlayManager};
 use overlay_manager;
 
-pub struct OverlayManagerInstance {
-    url: Url,
-    socket: Option<WebSocket<MaybeTlsStream<TcpStream>>>
-}
-
 pub struct ClientAuthorized {
     pub steamid2: String,
     pub user: overlay_manager::SteamUser,
-    pub auth_token: String 
+    pub auth_token: String,
 }
+
+
+pub struct OverlayManagerInstance {
+    url: Url,
+    socket: Option<WebSocket<MaybeTlsStream<TcpStream>>>,
+    connect_attempts: u16
+}
+
 
 impl OverlayManagerInstance {
     pub fn new(url: Url) -> Self {
         info!("Using url: {}", url);
         Self {
             socket: None,
-            url
+            url,
+            connect_attempts: 0
         }
     }
     
     pub fn reconnect(&mut self) -> tungstenite::Result<()> {
         connect(&self.url).map(|(mut socket, response)| {
             self.socket = Some(socket);
+            self.connect_attempts = 0;
+            info!("Connected to manager successfully");
             ()
+        }).map_err(|e| {
+            error!("Could not connect: {}", e.to_string());
+            self.connect_attempts += 1;
+            e
         })
+    }
+
+    // Constantly tries to reconnect, with exponentionally longe delays, sleeping in between attempts
+    pub fn reconnect_smart(&mut self) {
+        if self.reconnect().is_err() {
+            let ms = (self.connect_attempts^2) as f32/2.0;
+            let sleep_time = Duration::from_secs_f32(ms);
+            std::thread::sleep(sleep_time);
+        }
     }
 
     // two auth procedures: first time (get url) or token
@@ -92,6 +111,7 @@ impl OverlayManagerInstance {
         if self.socket.is_none() {
             return Err("Not connected to socket".to_string());
         }
+        // send disconnect
         let msg = self.socket.as_mut().unwrap().read().map_err(|e| e.to_string())?;
         Ok(if msg.is_text() {
             Some(serde_json::from_str(&msg.into_text().unwrap()).map_err(|e| e.to_string())?)
@@ -107,12 +127,9 @@ pub fn start_manager_read_thread(window: Window, manager: OverlayManager) {
         {
             debug!("Starting initial connection to manager...", );
             let mut manager = manager.lock().unwrap();
-            if let Err(err) = manager.reconnect() {
-                error!("Could not connect to manager: {}", err);
-                window.emit("manager", overlay_manager::ClientIncomingRequest::ManagerDisconnected).unwrap();
-                return;
-            }
-            info!("Connected to manager successfully");
+            manager.reconnect_smart();
+            // TODO: send manager connected
+            window.emit("manager", overlay_manager::ClientIncomingRequest::ManagerConnected).unwrap();
             if let Some(auth_token) = keyring.get_password().ok() {
                 debug!("using stored keyring");
                 trace!("{}", auth_token);
@@ -151,12 +168,21 @@ pub fn start_manager_read_thread(window: Window, manager: OverlayManager) {
 
         loop {
             let mut manager = manager.lock().unwrap();
-            if let Ok(Some(response)) = manager.read::<overlay_manager::ClientIncomingRequest>() {
-                window.emit("manager", response).unwrap();
+            match manager.read::<overlay_manager::ClientIncomingRequest>() {
+                Ok(Some(response)) => {
+                    window.emit("manager", response).unwrap();
+                },
+                Err(e) => {
+                    window.emit("manager", overlay_manager::ClientIncomingRequest::ManagerDisconnected).unwrap();
+                    
+                },
+                _ => {}
             }
+            // TODO: if disc
             drop(manager);
             sleep(Duration::from_secs(5))
         }
     });
 }
+
 

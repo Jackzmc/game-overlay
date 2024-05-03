@@ -498,6 +498,11 @@ braces@~3.0.2:
   dependencies:
     fill-range "^7.0.1"
 
+bulma-slider@^2.0.5:
+  version "2.0.5"
+  resolved "https://registry.yarnpkg.com/bulma-slider/-/bulma-slider-2.0.5.tgz#f84fb0b88704e33b76deac26801d7571c1db6a11"
+  integrity sha512-6woD/1E7q1o5bfEaQjNqpWZaCItC1oHe9bN15WYB2ELqz2gDaJYZkf+rlozGpAYOXQGDQGCCv3y+QuKjx6sQuw==
+
 bulma@^1.0.0:
   version "1.0.0"
   resolved "https://registry.yarnpkg.com/bulma/-/bulma-1.0.0.tgz#95e8ffa4feb8d64aa1c54a4f0ac6da08e0260672"

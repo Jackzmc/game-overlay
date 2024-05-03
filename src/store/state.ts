@@ -1,16 +1,51 @@
 import { defineStore } from 'pinia'
 
+export interface GlobalState {
+  interactable: boolean,
+  editable: boolean,
+  time: string,
+  date: string,
+  managerConnected: boolean,
+  steamid?: string,
+  steamUser?: SteamUser,
+  server?: {
+    ip: string,
+    port: number,
+    name: string
+  }
+}
+
+export interface SteamUser {
+  steamid: string;
+  communityvisibilitystate: number;
+  profilestate: number;
+  personaname: string;
+  profileurl: string;
+  avatar: string;
+  avatarmedium: string;
+  avatarfull: string;
+  avatarhash: string;
+  lastlogoff: number;
+  personastate: number;
+  primaryclanid: string;
+  timecreated: number;
+  personastateflags: number;
+  loccountrycode: string;
+  locstatecode: string;
+}
+
 export const useGlobalState = defineStore('state', {
-    state: () => ({ 
+    state: (): GlobalState => ({ 
+        // TODO: change to view state? as this still runs, might want to stop updating if hidden
         interactable: false,
         editable: false,
         time: "",
         date: "",
+        managerConnected: false,
 
-        steamid: null,
-        steamUser: null,
-        serverAddr: { ip: null, port: null },
-        serverName: ""
+        steamid: undefined,
+        steamUser: undefined,
+        server: undefined
     }),
     getters: {
       variables: (state) => {
@@ -19,8 +54,9 @@ export const useGlobalState = defineStore('state', {
           date: state.date,
           steamid: state.steamid ?? "[Unauthorized]",
           name: state.steamUser?.personaname ?? state.steamid ?? "Unknown",
-          server: state.serverName,
-          serverip: `${state.serverAddr.ip}:${state.serverAddr.port}`
+          server: state.server?.name,
+          serverip: state.server ? `${state.server.ip}:${state.server.port}` : '',
+          avatarurl: state.steamUser?.avatarfull
         }
       }
     },

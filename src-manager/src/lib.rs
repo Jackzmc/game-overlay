@@ -13,7 +13,9 @@ pub enum ClientIncomingRequest {
     ClientDisconnected,
     GameData {}, // TODO: implement
     Authorized { steamid2: String, auth_token: String, user: SteamUser },
-    ManagerDisconnected
+    // Manual activation for UI side:
+    ManagerDisconnected,
+    ManagerConnected
 }
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(tag = "type")]

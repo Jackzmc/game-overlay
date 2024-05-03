@@ -1,26 +1,31 @@
 export interface Position { x: number, y: number}
 export interface Size { width: number, height: number}
 export interface Color { r: number, g: number, b: number, a?: number }
-export type ElemType = "text" | "list"
 export enum ElemFlags {
     None = 0,
+    // Only show for survviors
+    SurvivorsOnly = 1,
+    // Show only on death
+    ShowOnlyOnDeath = 2,
+    // Show when not dead
+    ShowOnlyOnAlive = 4
+
 }
 export enum ElemVisibility {
     Always = 0,
-    /// Only show when overlay is in interact mode
+    /// Only show when overlay is in interact mode or edit mode
     InteractableOnly,
-    // Only show when overlay is in non-interactable mode
+    // Only show when overlay is in non-interactable mode or edit mode
     DisplayOnly
 }
 
+export type ElemType = "text" | "list:text" | "list:dynamic" 
 export interface BaseElement {
-    id: string,
+    // id: string,
     type: ElemType,
-    title?: string,
     zIndex?: number,
     defaults?: ElementState,
     flags?: ElemFlags,
-    visibility?: ElemVisibility
 }
 
 export interface TextElement extends BaseElement {
@@ -28,15 +33,28 @@ export interface TextElement extends BaseElement {
     text: string
 }
 
-export interface ListElement extends BaseElement {
-    type: "list",
-    list: ListElementEntry[]
+export interface TextListElement extends BaseElement {
+    type: "list:text",
+    list: TextListElementEntry[]
 }
-export interface ListElementEntry {
+export interface DynamicListElement extends BaseElement {
+    type: "list:dynamic",
+    list: Record<string, DynamicListElementEntry>,
+}
+export interface DynamicListElementEntry {
+    title?: string,
+    content: string,
+    data: Record<string, string>
+    actions?: Action[]
+}
+
+export interface TextListElementEntry {
     title?: string,
     content: string,
     actions?: Action[]
 }
+
+export type UIElement = TextElement | TextListElement | DynamicListElement
 
 export enum ActionFlags {
     None,
@@ -52,35 +70,18 @@ export interface Action {
 export interface ElementState {
     position?: Position,
     bgColor?: Color,
-    size?: Size
+    size?: Size,
+    visibility?: ElemVisibility,
+    // Store separately so we can changes colors independently
+    opacity?: number,
+    title?: string
 }
 
-export type UIElement = TextElement | ListElement
 export type StateKeys = keyof ElementState | "_reset"
-
-const test: ListElement = {
-    id: "test",
-    type: "list",
-    defaults: {
-        position: { x: 0, y: 0 }
-    },
-    title: "Players",
-    list: [
-        {
-            "content": "Player 1",
-            "actions": [
-                {
-                    "label": "Kick",
-                    "action": "kick #1235"
-                }
-            ]
-        }
-    ]
-}
 
 export type ManagerResponseType = "manager_disconnected" | "client_joined" | "client_disconnected" | "game_data" | "authorized"
 interface ManagerResponseBase {
-    // type: ManagerResponseType
+    type: ManagerResponseType
 }
 export interface ManagerResponseAuthorized extends ManagerResponseBase {
     type: "authorized",
@@ -89,4 +90,8 @@ export interface ManagerResponseAuthorized extends ManagerResponseBase {
     user: any //SteamUser
 }
 
-export type ManagerResponse = ManagerResponseAuthorized
+export interface ManagerResponseDisconnected {
+    type: "manager_disconnected"
+}
+
+export type ManagerResponse = ManagerResponseAuthorized | ManagerResponseDisconnected

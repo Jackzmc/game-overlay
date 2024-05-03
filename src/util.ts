@@ -12,7 +12,7 @@ export function parseMarkdown(content: string) {
     const clean = DOMPurify.sanitize(content)
     return marked.parse(clean)
 }
-export function replaceVariables(content: string, variables: Record<string, string|number|boolean>) {
+export function replaceVariables(content: string, variables: Record<string, string|number|boolean|undefined>) {
     return Object.entries(variables)
       .reduce((acc, [key, value]) => {
         let replacement: string

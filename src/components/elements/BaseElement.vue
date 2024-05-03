@@ -1,11 +1,14 @@
 <template>
-<div class="card root" ref="root" :style="style as StyleValue"@mouseleave="dropdownActive = false">
-    <header ref="header" class="card-header" :style="{cursor: store.editable?'move':'inherit'}" v-if="elem.title&&store.interactable" @mousedown="startDrag(false)" >
-        <p :class="['card-header-title',textColorClass]">
-            {{ elem.title }}
+<div :class="['card','root',{'invisible': store.interactable&&visibility==ElemVisibility.InteractableOnly}]" ref="root" :style="style as StyleValue"@mouseleave="dropdownActive = false" v-if="isVisible">
+    <header ref="header" class="card-header" :style="{cursor: store.editable?'move':'inherit'}" v-if="store.interactable">
+        <p :class="['card-header-title',textColorClass]" @mousedown="startDrag(false)" >
+            {{ title }}
             <span v-if="store.editable" class="tag ml-1" style="font-size:12px"> {{ size.width }}x{{ size.height }}</span>
         </p>
-        <div v-if="store.interactable" :class="['card-header-icon','dropdown','is-right',{'is-active': dropdownActive || colorPickerActive}]">
+        <button class="" aria-haspopup="true" @click="toggleVisibility">
+            <Icon :icon="visibility == ElemVisibility.Always ? 'fa-eye' : 'fa-eye-slash'" />
+        </button>
+        <div :class="['card-header-icon','dropdown','is-right',{'is-active': dropdownActive || colorPickerActive}]">
             <div class="dropdown-trigger"   @click.prevent="dropdownActive = !dropdownActive">
                 <button class="" aria-haspopup="true" aria-controls="dropdown-menu">
                     <Icon icon="fa-ellipsis" />
@@ -14,11 +17,16 @@
             <div class="dropdown-menu"role="menu">
                 <div class="dropdown-content" @click="dropdownActive = false">
                     <a class="dropdown-item" @click="startDrag(true)">Move</a>
-                    <a class="dropdown-item" @click="contentVisible = !contentVisible">{{ contentVisible ? 'Hide Content' : 'Show Content' }}</a>
+                    <a class="dropdown-item" @click="toggleVisibility">{{ visibility == ElemVisibility.Always ? 'Hide' : 'Show' }}</a>
                     <a class="dropdown-item" @click="colorPickerActive = !colorPickerActive">
                         Change Color
                         <span class="bd-color-swatch is-rounded" :style="contentStyle"></span>
                     </a>
+                    <div class="dropdown-item">
+                        <label class="label">Opacity</label>
+                        <input class="slider is-fullwidth" step="1" min="0" max="100" :value="bgColor.a * 100" type="range" @input="onOpacityChange">
+                    </div>
+                    <!-- TODO: add opacity slider -->
                     <hr class="dropdown-divider" />
                     <a href="#" class="dropdown-item" @click="emit('state', '_reset', '*')">Reset</a>
                     <ColorPicker v-if="colorPickerActive" @choose="color => emit('state', 'bgColor', color)" />
@@ -26,7 +34,7 @@
             </div>
         </div>
     </header>
-    <div ref="body" :class="['card-body',contentClass??'card-content',textColorClass]" :style="contentStyle" v-if="contentVisible">
+    <div ref="body" :class="['card-body',contentClass??'card-content',textColorClass,{'can-scroll': store.interactable}]" :style="contentStyle" v-if="isVisibleContent">
         <slot></slot>
     </div>
     <div class="resize-element-container">
@@ -38,8 +46,8 @@
 </template>
 
 <script setup lang="ts">
-import { StyleValue, computed, onMounted, ref } from 'vue';
-import { Color, ElementState, Position, StateKeys, UIElement } from '../../types.ts';
+import { StyleValue, computed, ref } from 'vue';
+import { ElemVisibility, ElementState, StateKeys, UIElement } from '../../types.ts';
 import { colorToCSS, shouldUseDarkText } from '../../util.ts';
 import { useGlobalState } from '../../store/state.ts';
 import ColorPicker from '../ColorPicker.vue'
@@ -59,21 +67,40 @@ const props = defineProps<{
 let root = ref<HTMLElement>()
 let body = ref<HTMLElement>()
 let header = ref<HTMLElement>()
-let contentVisible = ref(true)
 let dragging = ref(false)
 let dropdownActive = ref(false)
 let colorPickerActive = ref(false)
 
 const bgColor = computed(() => {
-    return props.state?.bgColor ?? props.elem.defaults?.bgColor ?? { r : 255, g: 255, b: 255, a: 1 }
+    const color = props.state?.bgColor ?? props.elem.defaults?.bgColor ?? { r : 255, g: 255, b: 255 }
+    color.a = getState("opacity", 0.6)
+    return color
+})
+const title = computed(() => {
+    return getState("title", "Untitled Element")
 })
 const textColorClass = computed(() => {
     return shouldUseDarkText(bgColor.value) ? "has-text-black" : "has-text-white"
 })
+const visibility = computed(() => {
+    return getState("visibility", ElemVisibility.Always)
+})
+const isVisible = computed(() => {
+    if(visibility.value == ElemVisibility.Always) return true
+    if(visibility.value == ElemVisibility.DisplayOnly) return !store.interactable || store.editable
+    if(visibility.value == ElemVisibility.InteractableOnly) return store.interactable
+    return true
+})
+const isVisibleContent = computed(() => {
+    if(visibility.value == ElemVisibility.Always) return true
+    if(visibility.value == ElemVisibility.DisplayOnly) return !store.interactable || store.editable
+    if(visibility.value == ElemVisibility.InteractableOnly) return !store.interactable
+    return true
+})
 
 function getState(key: keyof ElementState, defaultValue: any) {
     let value = props.state ? props.state[key] : undefined
-    if(!value) value = props.elem.defaults ? props.elem.defaults[key] : undefined
+    if(value == undefined) value = props.elem.defaults ? props.elem.defaults[key] : undefined
     return value ?? defaultValue
 }
 
@@ -105,6 +132,18 @@ const contentStyle = computed(() => {
         height: size.value.height + "px"
     }
 })
+
+function toggleVisibility() {
+    if(visibility.value == ElemVisibility.Always) {
+        emit("state", "visibility", ElemVisibility.InteractableOnly)
+    } else {
+        emit("state", "visibility", ElemVisibility.Always)
+    }
+}
+
+function onOpacityChange(e: any) {
+    emit("state", "opacity", e.target.value / 100)
+}
 
 function onMouseMove(e: any) {
     if(!header.value) return
@@ -140,7 +179,7 @@ function endDrag() {
     window.removeEventListener("mousemove", onMouseMove)
 }
 
-function onResizeStart(e: any) {
+function onResizeStart() {
     document.addEventListener("mousemove", onResize)
     document.addEventListener("mouseup", onResizeStop)
 }
@@ -160,7 +199,7 @@ function onResize(e: any) {
     emit("state", "size", size)
     e.preventDefault();
 }
-function onResizeStop(e: any) {
+function onResizeStop() {
     document.removeEventListener("mousemove", onResize)
     document.removeEventListener("mouseup", onResizeStop)
 }
@@ -171,8 +210,11 @@ function onResizeStop(e: any) {
     min-width: 11em;
     min-height: 3rem;
 }
-.card-body {
+.can-scroll {
     overflow-y: auto;
+}
+.card-body {
+    overflow-y: hidden;
     overflow-x: clip;
     min-width: fit-content;
     min-height: fit-content;

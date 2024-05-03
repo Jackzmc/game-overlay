@@ -17,7 +17,7 @@
 <script setup lang="ts">
 import BaseElement from './BaseElement.vue';
 import ActionButton from '../ActionButton.vue';
-import { ElementState, ListElement, StateKeys } from '../../types.ts';
+import { ElementState, TextListElement, StateKeys } from '../../types.ts';
 import { parseMarkdown } from '../../util.ts';
 import { useGlobalState } from '../../store/state.ts';
 
@@ -28,7 +28,7 @@ const emit = defineEmits<{
 }>()
 
 const props = defineProps<{
-    elem: ListElement,
+    elem: TextListElement,
     state?: ElementState,
 }>()
 

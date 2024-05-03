@@ -9,7 +9,7 @@ import BaseElement from './BaseElement.vue';
 import { ElementState, StateKeys, TextElement } from '../../types.ts';
 
 import { parseMarkdown, replaceVariables } from '../../util.ts'
-import { computed, inject, onMounted, ref, watch } from 'vue';
+import { onMounted, ref, watch } from 'vue';
 import { useGlobalState } from '../../store/state.ts';
 
 const store = useGlobalState()

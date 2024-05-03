@@ -17,17 +17,14 @@ use std::time::Duration;
 use active_win_pos_rs::get_active_window;
 use tungstenite::{connect, Message};
 use log::{error, trace};
+use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 use crate::manager::{OverlayManagerInstance, start_manager_read_thread};
 
 
-#[cfg(windows)]
-// const TARGET_PROC_NAME: &str = "left4dead2.exe";
-const TARGET_PROC_NAME: &str = "thunderbird.exe";
-#[cfg(unix)]
-// const TARGET_PROC_NAME: &str = "left4dead2";
-const TARGET_PROC_NAME: &str = "thunderbird";
 const PROCESS_CHECK_INTERVAL: u64 = 1000 * 1;
+
+static TARGET_PROC_NAME: Lazy<String> = Lazy::new(|| env::var("TARGET_PROCESS_NAME").expect("Missing TARGET_PROCESS_NAME"));
 
 #[derive(PartialEq, serde::Serialize, Clone, Debug)]
 enum ViewState {
@@ -155,13 +152,14 @@ struct ProcessDataResult {
 }
 fn start_process_check_thread(window: tauri::Window) {
     std::thread::spawn(move || {
-        debug!("process check thread started. target process: {}", TARGET_PROC_NAME);
+        debug!("process check thread started. target process: {}", TARGET_PROC_NAME.deref());
         loop {
             let state = window.state::<Mutex<AppData>>();
             let active_window = match get_active_window() {
                 Ok(window) => window,
                 Err(_) => {
                     error!("get_active_window returned error");
+                    std::thread::sleep(Duration::from_secs(2));
                     continue;
                 }
             };
@@ -173,10 +171,11 @@ fn start_process_check_thread(window: tauri::Window) {
             let mut active = data.view_state == ViewState::Visible;
             // println!("active={} target={}", active_window.app_name, TARGET_PROC_NAME);
 
-            if let Some(proc) = data.sys.processes_by_name(TARGET_PROC_NAME).next() {
+            if let Some(proc) = data.sys.processes_by_name(TARGET_PROC_NAME.deref()).next() {
                 let pid = proc.pid().as_u32();
                 // println!("proc found. pid={} active_pid={}", pid, active_window.process_id);
-                if active_window.process_id == our_pid || active_window.process_id == pid as u64 || active_window.app_name == TARGET_PROC_NAME {
+                /* active_window.process_id == our_pid ||  */
+                if active_window.process_id == pid as u64 || active_window.app_name == *TARGET_PROC_NAME {
                     trace!("found proc. pid={pid}");
                     window.emit("process", ProcessDataResult {
                         pid,
@@ -191,7 +190,7 @@ fn start_process_check_thread(window: tauri::Window) {
                 }
             } else {
                 // Fallback incase we can detect active window but can't find it's name (unix differences). Won't have payload data.
-                active = active_window.app_name == TARGET_PROC_NAME;
+                active = active_window.app_name == *TARGET_PROC_NAME;
             }
 
             if data.view_state != ViewState::Interactable {
@@ -208,6 +207,7 @@ fn start_process_check_thread(window: tauri::Window) {
             drop(data);
             std::thread::sleep(Duration::from_millis(PROCESS_CHECK_INTERVAL));
         }
+        error!("exiting process check loop");
     });
 }
 
@@ -229,6 +229,7 @@ fn overlay_key(window: Window, data: State<Mutex<AppData>>) -> bool {
     let mut data = data.lock().unwrap();
     if data.view_state == ViewState::Interactable {
         debug!("overlay_key: hiding");
+        // TODO: check process to determine state
         data.view_state = ViewState::Hidden;
         window.hide().unwrap();
         window.set_ignore_cursor_events(true).unwrap();
@@ -238,6 +239,7 @@ fn overlay_key(window: Window, data: State<Mutex<AppData>>) -> bool {
         data.view_state = ViewState::Interactable;
         window.show().unwrap();
         window.set_ignore_cursor_events(false).unwrap();
+        window.set_focus().unwrap();
         true
     }
 }
