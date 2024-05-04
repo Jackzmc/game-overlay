@@ -2,8 +2,6 @@ use std::error::Error;
 use std::fmt;
 use serde::{Deserialize, Serialize};
 
-mod steam;
-pub use crate::steam::SteamUser;
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(tag = "type")]
 #[serde(rename_all = "snake_case")]
@@ -15,7 +13,8 @@ pub enum ClientIncomingRequest {
     Authorized { steamid2: String, auth_token: String, user: SteamUser },
     // Manual activation for UI side:
     ManagerDisconnected,
-    ManagerConnected
+    ManagerConnected,
+    RegisterUI { namespace: String, id: String }
 }
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(tag = "type")]
@@ -41,7 +40,17 @@ pub enum ServerOutgoingEvent {
     PlayerJoined { steamid: String },
     PlayerLeft { steamid: String },
     GameState {}, // TODO: implement
-    Disconnecting
+    Disconnecting,
+    RegisterTempUI { namespace: String, id: String, expires_seconds: Option<u64> }
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(rename_all = "snake_case")]
+pub struct UIElement {
+    #[serde(rename = "type")]
+    pub ui_type: String,
+    #[serde(flatten)]
+    pub other_fields: Value
 }
 
 #[derive(Serialize, Deserialize)]
@@ -64,6 +73,7 @@ pub enum InitConnectionResPayload {
 }
 use tokio_tungstenite::tungstenite::Message as TungsteniteMessage;
 use axum::extract::ws::Message as AxumMessage;
+use serde_json::Value;
 
 impl Into<AxumMessage> for InitConnectionResPayload {
     fn into(self) -> AxumMessage {
@@ -112,4 +122,40 @@ impl fmt::Display for AuthFailure {
             _ => write!(f, "generic authentication failure")
         }
     }
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct SteamUser {
+    #[serde(rename = "avatar")]
+    pub avatar: String,
+    #[serde(rename = "avatarfull")]
+    pub avatar_full: String,
+    #[serde(rename = "avatarhash")]
+    pub avatar_hash: String,
+    #[serde(rename = "avatarmedium")]
+    pub avatar_medium: String,
+    #[serde(rename = "communityvisibilitystate")]
+    pub community_visibility_state: i64,
+    #[serde(rename = "lastlogoff")]
+    pub last_log_off: i64,
+    #[serde(rename = "loccountrycode")]
+    pub loc_country_code: String,
+    #[serde(rename = "locstatecode")]
+    pub loc_state_code: String,
+    #[serde(rename = "personaname")]
+    pub persona_name: String,
+    #[serde(rename = "personastate")]
+    pub persona_state: i64,
+    #[serde(rename = "personastateflags")]
+    pub persona_state_flags: i64,
+    #[serde(rename = "primaryclanid")]
+    pub primary_clan_id: String,
+    #[serde(rename = "profilestate")]
+    pub profile_state: i64,
+    #[serde(rename = "profileurl")]
+    pub profile_url: String,
+    #[serde(rename = "steamid")]
+    pub steamid: String,
+    #[serde(rename = "timecreated")]
+    pub time_created: i64,
 }

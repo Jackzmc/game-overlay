@@ -4,6 +4,7 @@ use reqwest::{RequestBuilder, Response};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use steamid_ng::SteamID;
+use overlay_manager::SteamUser;
 
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -112,39 +113,4 @@ pub struct SteamResponse<T> {
 #[derive(Serialize, Deserialize)]
 pub struct PlayerSummariesResponse {
     players: Vec<SteamUser>,
-}
-#[derive(Serialize, Deserialize, Clone, Debug)]
-pub struct SteamUser {
-    #[serde(rename = "avatar")]
-    pub avatar: String,
-    #[serde(rename = "avatarfull")]
-    pub avatar_full: String,
-    #[serde(rename = "avatarhash")]
-    pub avatar_hash: String,
-    #[serde(rename = "avatarmedium")]
-    pub avatar_medium: String,
-    #[serde(rename = "communityvisibilitystate")]
-    pub community_visibility_state: i64,
-    #[serde(rename = "lastlogoff")]
-    pub last_log_off: i64,
-    #[serde(rename = "loccountrycode")]
-    pub loc_country_code: String,
-    #[serde(rename = "locstatecode")]
-    pub loc_state_code: String,
-    #[serde(rename = "personaname")]
-    pub persona_name: String,
-    #[serde(rename = "personastate")]
-    pub persona_state: i64,
-    #[serde(rename = "personastateflags")]
-    pub persona_state_flags: i64,
-    #[serde(rename = "primaryclanid")]
-    pub primary_clan_id: String,
-    #[serde(rename = "profilestate")]
-    pub profile_state: i64,
-    #[serde(rename = "profileurl")]
-    pub profile_url: String,
-    #[serde(rename = "steamid")]
-    pub steamid: String,
-    #[serde(rename = "timecreated")]
-    pub time_created: i64,
 }

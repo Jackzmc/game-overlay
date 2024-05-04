@@ -55,19 +55,26 @@ const ELEM_TYPE_MAP: Record<ElemType, any> = markRaw({
 })
 
 // type PartialBy<T, K extends keyof T> = Omit<T, K> & Partial<Pick<T, K>>
-function addElement(groupId: string | null, id: string, element: UIElement) {
-  const elem = {
-    ...element,
-    id: `${groupId ?? ''}:${id}`
+function setElement(namespace: string | null, id: string, element: UIElement) {
+  const fullId = `${namespace??''}:${id}`
+  console.log(JSON.stringify(element))
+  elementRegistry.value[fullId] = {
+    component: markRaw(ELEM_TYPE_MAP[element.type]),
+    element: element
   }
-  elementRegistry.value[id] = {
-    component: markRaw(ELEM_TYPE_MAP[elem.type]),
-    element: elem
+}
+async function fetchElement(namespace: string, id: string): Promise<UIElement> {
+  try {
+    const elem = await invoke("fetch_element", namespace, id)
+    return elem
+  } catch(err) {
+    // TODO: throw better err
+    alert("fetchElement:" + err.message)
   }
 }
 
 function test() {
-  addElement(null, "test", {
+  setElement(null, "test", {
     type: "text",
     defaults: {
       position:{ x: 20, y: 15 },
@@ -76,7 +83,7 @@ function test() {
     },
     text: "* Time: %time%\n* Date: %date%\n* Hello %name%, your steamid is %steamid%\n* You are on: %server% (%serverip%)",
   })
-  addElement(null, "test2", {
+  setElement(null, "test2", {
     type: "text",
     defaults: {
       bgColor: { r: 120, g: 255, b: 255 },
@@ -85,7 +92,7 @@ function test() {
     },
     text: "# markdown test\n**blah** blah blah\nlorem ipsum dolor sit amet"
   })
-  addElement(null, "big_list", {
+  setElement(null, "big_list", {
     type: "list:text",
     defaults: {
       title: "Big List",
@@ -97,7 +104,7 @@ function test() {
       }
     })
   })
-  addElement(null, "list", {
+  setElement(null, "list", {
     "type": "list:text",
     defaults: {
       position: { x: 400, y: 10 },
@@ -202,11 +209,18 @@ async function registerShortcuts() {
     });
 }
 
-function onManagerData(payload: ManagerResponse) {
+async function onManagerData(payload: ManagerResponse) {
   console.debug("Got payload", payload.type, payload)
   switch(payload.type) {
     case "authorized": {
       store.authorize(payload.steamid2, payload.user)
+      break;
+    }
+    case "register_ui": {
+      // TODO: automatically do this manager side? idk
+      const elem = await fetchElement(payload.namespace, payload.id)
+      if(elem)
+        setElement(payload.namespace, payload.id, elem)
       break;
     }
     case "manager_disconnected": {

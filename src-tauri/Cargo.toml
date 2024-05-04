@@ -24,6 +24,7 @@ overlay_manager = { path = "../src-manager" }
 keyring = "2"
 once_cell = "1.19.0"
 webbrowser = "1.0.0"
+reqwest = "0.12.4"
 
 #[dependencies.windows]
 #version = "^0.56.0"

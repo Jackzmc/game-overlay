@@ -10,14 +10,14 @@ use jwt::VerifyWithKey;
 use log::debug;
 use tokio::sync::Mutex;
 use serde::{Deserialize, Serialize};
+use sqlx::{MySqlPool, Pool};
 use steamid_ng::SteamID;
 use tokio::sync::mpsc::UnboundedSender;
-use overlay_manager::AuthFailure;
-use crate::client::{ClientIncomingRequest, ClientInstance, ClientOutgoingEvent};
+use overlay_manager::{AuthFailure, ClientOutgoingEvent, ServerOutgoingEvent, ClientIncomingRequest, ServerIncomingRequest};
+use crate::client::{ClientInstance};
 use crate::{AppError, JWT_SECRET_KEY};
-use crate::server::{ServerInstance, ServerOutgoingEvent};
-use crate::steam::{SteamClient, SteamUser};
-
+use crate::server::{ServerInstance};
+use crate::steam::{SteamClient};
 
 pub type Client = Arc<Mutex<ClientInstance>>;
 pub type Server = Arc<Mutex<ServerInstance>>;
@@ -43,21 +43,33 @@ pub struct ClientTokenClaims {
     #[serde(rename = "ip")]
     pub ip_addr: Option<String>
 }
-
+#[derive(Serialize, Deserialize)]
+pub struct ServerTokenClaims {
+    pub namespace: String,
+    #[serde(rename = "sub")]
+    pub subject: String,
+    #[serde(rename = "iss")]
+    pub issuer: String,
+    #[serde(rename = "iat")]
+    pub issued_at: u64,
+    #[serde(rename = "ip")]
+    pub ip_addr: Option<String>
+}
 pub struct ManagerInstance {
     clients: HashMap<String, Client>,
     client_steamid_map: HashMap<SteamID, String>, // Maps SteamID to HashMap
     servers: HashMap<String, Server>,
-    steam: SteamClient
+    steam: SteamClient,
 }
-pub type Manager = Arc<tokio::sync::Mutex<ManagerInstance>>;
+pub type Manager = Arc<Mutex<ManagerInstance>>;
+#[allow(unused)]
 impl ManagerInstance {
     pub fn new(steam: SteamClient) -> Self {
         Self {
             clients: Default::default(),
             client_steamid_map: Default::default(),
             servers: Default::default(),
-            steam
+            steam,
         }
     }
 
@@ -136,14 +148,17 @@ impl ManagerInstance {
         self.client_steamid_map.get(&steamid).and_then(|id| self.get_client(id))
     }
 
-    pub fn try_authorize_server(&mut self, addr: SocketAddr, tx: UnboundedSender<Message>, auth_token: String) -> Result<Server, AuthFailure> {
-        if auth_token.is_empty() {
-            return Err(AuthFailure::InvalidAuthToken(None))
+
+    pub async fn try_authorize_server(&mut self, addr: SocketAddr, tx: UnboundedSender<Message>, auth_token: String) -> Result<Server, AuthFailure> {
+        let claims: ServerTokenClaims = auth_token.verify_with_key(JWT_SECRET_KEY.deref())
+            .map_err(|e| AuthFailure::InvalidAuthToken(Some(e.to_string())))?;
+        let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
+        if claims.issued_at > now {
+            return Err(AuthFailure::InvalidAuthToken(Some("token issued in the future and is invalid".to_string())))
         }
-        let id = ServerInstance::next_id();
-        let server = ServerInstance::with_id(addr, tx, id.clone());
+        let server = ServerInstance::with_id(addr, tx, claims.namespace, claims.subject.clone());
         let server = Arc::new(Mutex::new(server));
-        self.servers.insert(id, server.clone());
+        self.servers.insert(claims.subject, server.clone());
         Ok(server)
     }
 
@@ -169,6 +184,7 @@ impl ManagerInstance {
                     let mut client = client.lock().await;
                     client._set_server(Some(server.clone()));
                     client.send_request(&ClientIncomingRequest::ClientJoined).unwrap();
+                    // TODO: fetch ui elements? or server should
                 }
             },
             ServerOutgoingEvent::PlayerLeft { steamid} => {

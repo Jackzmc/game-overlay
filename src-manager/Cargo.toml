@@ -29,3 +29,4 @@ serde_qs = {  version = "0.13.0", features = ["warp"] }
 hmac = "0.12.1"
 sha2 = "0.10.8"
 axum = { version = "0.7.5", features = ["ws"] }
+sqlx = { version = "0.7", features = [ "runtime-tokio", "mysql", "json", "macros" ] }

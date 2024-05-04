@@ -16,9 +16,9 @@ use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::{atomic::{AtomicUsize, Ordering}, Arc, OnceLock, Mutex};
 use std::time::Duration;
-use axum::{Router, ServiceExt};
+use axum::{Json, Router, ServiceExt};
 use axum::body::Body;
-use axum::extract::{ConnectInfo, Query, State};
+use axum::extract::{ConnectInfo, Path, Query, State};
 use axum::routing::{get, post};
 use axum_template::engine::Engine;
 use futures_util::{SinkExt, StreamExt, TryFutureExt, TryStreamExt};
@@ -31,21 +31,21 @@ use steamid_ng::SteamID;
 use uuid::Uuid;
 use serde::{Serialize,Deserialize};
 
-use crate::client::{ClientIncomingRequest, ClientOutgoingEvent};
 use crate::manager::{Client, Manager, ManagerInstance, Server};
-use crate::server::{ServerIncomingRequest, ServerOutgoingEvent};
 use once_cell::sync::Lazy;
 use sha2::digest::KeyInit;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
-use crate::steam::{OpenIDPayload, SteamClient, SteamUser};
+use crate::steam::{OpenIDPayload, SteamClient};
 use axum::extract::WebSocketUpgrade;
 use axum::extract::ws::{Message, WebSocket};
 use axum::http::response::Parts;
-use axum::http::StatusCode;
-use axum::response::IntoResponse;
+use axum::http::{HeaderMap, StatusCode};
+use axum::response::{AppendHeaders, IntoResponse};
 use axum_template::{RenderHtml, TemplateEngine};
+use sqlx::MySqlPool;
 use tokio::time::timeout;
-use overlay_manager::{AuthFailure, InitConnectionReqPayload, InitConnectionResPayload};
+use overlay_manager::{AuthFailure, ClientOutgoingEvent, InitConnectionReqPayload, InitConnectionResPayload, ServerOutgoingEvent, ServerIncomingRequest, ClientIncomingRequest, UIElement};
+use crate::server::Element;
 
 type QueryMap = HashMap<String, String>;
 static CLIENT_AUTH_TIMEOUT: Duration = Duration::from_secs(60 * 4);
@@ -62,6 +62,7 @@ static JWT_SECRET_KEY: Lazy<hmac::Hmac<sha2::Sha256>> = Lazy::new(|| {
     hmac::Hmac::new_from_slice(raw.as_bytes()).expect("could not generate Hmac<Sha256> from JWT_SECRET")
 });
 
+static POOL: OnceLock<MySqlPool> = OnceLock::new();
 #[derive(Debug)]
 struct MissingQueryParameter(String);
 #[derive(Debug, Serialize)]
@@ -77,9 +78,9 @@ struct AppState {
 }
 impl AppState {
 
-    pub fn new() -> Self {
+    pub async fn new() -> Self {
         let http_client = get_client();
-        let steam = SteamClient::new(http_client.clone(), std::env::var("STEAM_APIKEY").expect("missing STEAM_APIKEY"));
+        let steam = SteamClient::new(http_client.clone(), env::var("STEAM_APIKEY").expect("missing STEAM_APIKEY"));
         let manager = ManagerInstance::new(steam.clone());
         let manager: Manager = Arc::new(tokio::sync::Mutex::new(manager));
         let mut hb = Handlebars::new();
@@ -102,8 +103,10 @@ async fn main() {
         warn!("Env STEAM_DONT_VALIDATE is set, validation of steam logins will not take place");
     }
     pretty_env_logger::init();
+    let pool = MySqlPool::connect(&env::var("DATABASE_URL").expect("missing DATABASE_URL")).await.expect("mysql connection failed");
+    POOL.set(pool).unwrap();
 
-    let state = AppState::new();
+    let state = AppState::new().await;
     let assets_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("static");
 
     let app = Router::new()
@@ -111,6 +114,7 @@ async fn main() {
         .route("/socket", get(route_socket))
         .route("/auth/login", get(route_steam_login))
         .route("/auth/callback", get(route_steam_callback))
+        .route("/elements/:namespace/:id", get(route_get_element))
         .with_state(Arc::new(state));
 
     let listener = tokio::net::TcpListener::bind(*LISTEN_ADDRESS).await.unwrap();
@@ -126,7 +130,8 @@ enum AppError {
     SessionExpired,
     GenericServerError { message: String },
     EntityNotFound { message: String },
-    MissingQueryParameter(String)
+    MissingQueryParameter(String),
+    DatabaseError { message: String }
 }
 
 impl IntoResponse for AppError {
@@ -143,6 +148,9 @@ impl IntoResponse for AppError {
                 (StatusCode::NOT_FOUND, serde_json::to_string(&e))
             },
             e @ AppError::GenericServerError { .. } => {
+                (StatusCode::INTERNAL_SERVER_ERROR, serde_json::to_string(&e))
+            },
+            e @ AppError::DatabaseError { .. } => {
                 (StatusCode::INTERNAL_SERVER_ERROR, serde_json::to_string(&e))
             },
             AppError::SessionExpired => {
@@ -206,6 +214,25 @@ async fn route_steam_callback(
     manager.authorize_client(&query.id, steamid.clone()).await
         .map_err(|e| AppError::GenericServerError { message: e.to_string() })?;
     Ok(RenderHtml("login_success", state.engine.clone(), json!({})))
+}
+
+async fn route_get_element(
+    Path((namespace, id)): Path<(String, String)>,
+    State(state): State<Arc<AppState>>,
+) -> Result<impl IntoResponse, AppError> {
+    let pool = POOL.get().unwrap();
+    // TODO: cache?
+    let row = sqlx::query_as!(Element, "SELECT e.id, e.data FROM overlay_elements e WHERE namespace = ? AND id = ?", namespace, id)
+        .fetch_optional(pool)
+        .await
+        .map_err(|e| AppError::DatabaseError { message: e.to_string() })?;
+    if let Some(row) = row {
+        // We could use Json() but its already stringified, so we avoid unnecessarily converting to JSON and back:
+        Ok(([(axum::http::header::CONTENT_TYPE, "application/json")], row.data))
+        // Ok(Json(row.data))
+    } else {
+        Err(AppError::EntityNotFound { message: format!("No element with the id {id} was found in the {namespace} namespace").to_string() })
+    }
 }
 
 #[derive(Serialize, Deserialize)]
@@ -304,7 +331,7 @@ async fn login_connection(mut ws: WebSocket, manager: Manager, req: InitConnecti
         }
         InitConnectionReqPayload::Server { auth_token } => {
             debug!("login_connection - authorizing server");
-            match mngr.try_authorize_server(addr, tx.clone(), auth_token) {
+            match mngr.try_authorize_server(addr, tx.clone(), auth_token).await {
                 Ok(server) => {
                     drop(mngr);
                     {
@@ -407,8 +434,8 @@ async fn init_server_connection(mut ws: WebSocket, (mut tx, mut rx): (UnboundedS
     // Cleanup server
     let server = server.lock().await;
     let id = server.id();
-    drop(server);
     manager.lock().await.remove_server(&id);
+    drop(server);
 }
 async fn send(ws: &mut WebSocket, response: InitConnectionResPayload) -> bool {
     let json = serde_json::to_string(&response).unwrap();
