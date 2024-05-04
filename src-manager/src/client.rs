@@ -8,27 +8,10 @@ use sha2::digest::KeyInit;
 use steamid_ng::SteamID;
 use tokio::sync::mpsc::UnboundedSender;
 use uuid::Uuid;
+use overlay_manager::ClientIncomingRequest;
 use crate::JWT_SECRET_KEY;
 use crate::manager::{RequestError, Server};
-use crate::steam::SteamUser;
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
-#[serde(tag = "type")]
-#[serde(rename_all = "snake_case")]
-/// Messages that are being sent to client (Client <- Manager)
-pub enum ClientIncomingRequest {
-    ClientJoined,
-    ClientDisconnected,
-    GameData {}, // TODO: implement
-    Authorized { steamid2: String, auth_token: String, user: SteamUser }
-}
-#[derive(Serialize, Deserialize, Debug, Clone)]
-#[serde(tag = "type")]
-#[serde(rename_all = "snake_case")]
-/// Messages that are being received from the client (Client -> Manager)
-pub enum ClientOutgoingEvent {
-
-}
 pub struct ClientInstance {
     id: Uuid,
     steamid: Option<SteamID>,

@@ -3,49 +3,37 @@ use std::collections::HashMap;
 use std::net::SocketAddr;
 use axum::extract::ws::Message;
 use serde::{Deserialize, Serialize};
+use sqlx::{Executor, FromRow, MySqlPool, query};
 use steamid_ng::SteamID;
 use tokio::sync::mpsc::UnboundedSender;
 use uuid::Uuid;
-use crate::client::ClientIncomingRequest;
+use overlay_manager::{ServerIncomingRequest, UIElement};
 use crate::manager::{Client, RequestError};
+use crate::POOL;
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
-#[serde(tag = "type")]
-#[serde(rename_all = "snake_case")]
-/// Messages that are being sent to server (Server <- Manager)
-pub enum ServerIncomingRequest {
-    Authorized
-}
-#[derive(Serialize, Deserialize, Debug, Clone)]
-#[serde(tag = "type")]
-#[serde(rename_all = "snake_case")]
-/// Messages that are being received from server. (Server -> Manager)
-pub enum ServerOutgoingEvent {
-    PlayerJoined { steamid: String },
-    PlayerLeft { steamid: String },
-    GameState {}, // TODO: implement
-    Disconnecting
-}
 pub struct ServerInstance {
     tx: UnboundedSender<Message>,
-    id: Uuid,
+    namespace: String,
+    id: String,
     clients: HashMap<SteamID, Client>,
-    addr: SocketAddr
+    addr: SocketAddr,
+    ui_elements: HashMap<String, UIElement>,
+
+    // db: MySqlPool
 }
 impl ServerInstance {
-    pub fn next_id() -> String {
-        Uuid::new_v4().to_string()
-    }
-    pub fn with_id(addr: SocketAddr, tx: UnboundedSender<Message>, id: String) -> Self {
+    pub fn with_id(addr: SocketAddr, tx: UnboundedSender<Message>, namespace: String, id: String) -> Self {
         Self {
             addr,
             tx,
-            id: id.parse().unwrap(),
-            clients: HashMap::new()
+            namespace,
+            id,
+            clients: HashMap::new(),
+            ui_elements: HashMap::new(),
         }
     }
-
-    pub fn id(&self) -> String { self.id.to_string() }
+    pub fn namespace(&self) -> &str { &self.namespace }
+    pub fn id(&self) -> &str { &self.id }
     pub fn num_clients(&self) -> usize { self.clients.len() }
     pub fn clients(&self) -> Values<'_, SteamID, Client> {
         self.clients.values().into_iter()
@@ -67,6 +55,59 @@ impl ServerInstance {
             Err(ClientNotAuthorized)
         }
     }
+
+    // Grabs an element from cache or fetches it
+//     pub async fn get_element(&mut self, id: &str, bypass_cache: bool) -> Result<Option<&UIElement>, String> {
+//         if !bypass_cache && self.ui_elements.contains_key(id) {
+//             Ok(Some(self.ui_elements.get(id).unwrap()))
+//         } else {
+//             let pool = POOL.get().unwrap();
+//             let row = query!("SELECT e.id, e.data FROM overlay_elements_servers es LEFT JOIN overlay_elements e ON e.id = es.element_id WHERE es.namespace = ? AND es.server_id = ? LIMIT 1", self.namespace, );
+//             Ok(None)
+// //             let row = sqlx::query_as::<_, Option<Element>>("SELECT e.id, e.data FROM overlay_elements_servers es
+// //     LEFT JOIN overlay_elements e ON e.id = es.element_id
+// // WHERE es.namespace = ? AND es.server_id = ? LIMIT 1")
+// //                 .bind(&self.namespace)
+// //                 .bind(&self.id)
+// //                 .fetch_one(pool).await
+// //                 .map_err(|e| e.to_string())?;
+// //             row
+// //                 .map(|row| {
+// //                     Ok(self._insert_element(row))
+// //                 })
+// //                 .or_else(|| Ok(None))
+//         }
+//     }
+
+    fn _insert_element(&mut self, elem: Element) -> Result<&UIElement, String> {
+        let json: UIElement =  serde_json::from_str(&elem.data).map_err(|e| e.to_string())?;
+        self.ui_elements.insert(elem.id.clone(), json);
+        Ok(self.ui_elements.get(&elem.id).unwrap())
+    }
+
+    pub async fn fetch_elements(&mut self) -> Result<Vec<UIElement>, String> {
+        let pool = POOL.get().unwrap();
+        let rows: Vec<Element> = sqlx::query_as("SELECT e.id, e.data FROM overlay_elements_servers es
+    LEFT JOIN overlay_elements e ON e.id = es.element_id
+WHERE es.namespace = ? AND es.server_id = ?")
+            .bind(&self.namespace)
+            .bind(&self.id)
+            .fetch_all(pool).await
+            .map_err(|e| e.to_string())?;
+        let mut elements = Vec::new();
+        for row in rows {
+            let elem = self._insert_element(row)?;
+            elements.push(elem.clone())
+        }
+        Ok(elements)
+
+    }
+}
+
+#[derive(FromRow)]
+pub struct Element {
+    pub id: String,
+    pub data: String
 }
 
 pub struct ClientNotAuthorized;

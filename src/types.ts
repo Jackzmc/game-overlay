@@ -79,7 +79,7 @@ export interface ElementState {
 
 export type StateKeys = keyof ElementState | "_reset"
 
-export type ManagerResponseType = "manager_disconnected" | "client_joined" | "client_disconnected" | "game_data" | "authorized"
+export type ManagerResponseType = "manager_disconnected" | "client_joined" | "client_disconnected" | "game_data" | "authorized" | "register_ui"
 interface ManagerResponseBase {
     type: ManagerResponseType
 }
@@ -93,5 +93,10 @@ export interface ManagerResponseAuthorized extends ManagerResponseBase {
 export interface ManagerResponseDisconnected {
     type: "manager_disconnected"
 }
+export interface ManagerResponseRegisterUI {
+    type: "register_ui",
+    namespace: string,
+    id: string
+}
 
-export type ManagerResponse = ManagerResponseAuthorized | ManagerResponseDisconnected
+export type ManagerResponse = ManagerResponseAuthorized | ManagerResponseDisconnected | ManagerResponseRegisterUI

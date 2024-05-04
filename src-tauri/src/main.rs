@@ -12,13 +12,15 @@ use std::ops::Deref;
 use std::path::PathBuf;
 use sysinfo::{Pid, ProcessStatus, System};
 use tauri::{AppHandle, Manager, PhysicalPosition, Position, Size, State, Url, Window};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 use active_win_pos_rs::get_active_window;
 use tungstenite::{connect, Message};
 use log::{error, trace};
 use once_cell::sync::Lazy;
+use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 use crate::manager::{OverlayManagerInstance, start_manager_read_thread};
 
 
@@ -40,9 +42,9 @@ struct AppData {
     view_state: ViewState,
     manager: OverlayManager,
     config_file_path: PathBuf,
-    config: AppConfig
+    config: AppConfig,
+    http_url: Url
 }
-
 #[derive(Serialize, Deserialize)]
 pub struct AppConfig {
 }
@@ -55,7 +57,7 @@ impl AppConfig {
 }
 
 impl AppData {
-    pub fn new(manager_inst: OverlayManagerInstance) -> Self {
+    pub fn new(manager_inst: OverlayManagerInstance, http_url: Url) -> Self {
         let mut sys = System::new();
         sys.refresh_processes();
         let config_path = tauri::api::path::config_dir().unwrap().join("config.json");
@@ -65,7 +67,8 @@ impl AppData {
             view_state: ViewState::Hidden,
             manager: Arc::new(Mutex::new(manager_inst)),
             config_file_path: config_path,
-            config
+            config,
+            http_url
         }
     }
 
@@ -91,15 +94,17 @@ impl AppData {
 }
 
 fn init_data() -> AppData {
-    let url = Url::parse(&std::env::var("MANAGER_WS_URL").unwrap_or_else(|_| "ws://127.0.0.1:3011/socket".to_string())).expect("bad MANAGER_WS_URL");
-    let manager = manager::OverlayManagerInstance::new(url);
-    AppData::new(manager)
+    let ws_url = Url::parse(&env::var("MANAGER_WS_URL").unwrap_or_else(|_| "ws://127.0.0.1:3011/socket".to_string())).expect("bad MANAGER_WS_URL");
+    let http_url = Url::parse(&env::var("MANAGER_HTTP_URL").unwrap_or_else(|_| "http://127.0.0.1:3011".to_string())).expect("bad MANAGER_HTTP_URL");
+    let manager = manager::OverlayManagerInstance::new(ws_url);
+    AppData::new(manager, http_url)
 }
 
 fn main() {
-    if std::env::var("RUST_LOG").is_err() {
-        std::env::set_var("RUST_LOG", format!("warn,{}=info", env!("CARGO_PKG_NAME")));
+    if env::var("RUST_LOG").is_err() {
+        env::set_var("RUST_LOG", format!("warn,{}=info", env!("CARGO_PKG_NAME")));
     }
+
     pretty_env_logger::init();
 
     let context = tauri::generate_context!();
@@ -137,7 +142,7 @@ fn main() {
             Ok(())
         })
         .manage(data)
-        .invoke_handler(tauri::generate_handler![init_login, overlay_key, perform_action])
+        .invoke_handler(tauri::generate_handler![fetch_element, overlay_key, perform_action])
         .run(context)
         .expect("error while running tauri application");
 }
@@ -212,16 +217,26 @@ fn start_process_check_thread(window: tauri::Window) {
 }
 
 #[tauri::command]
-async fn init_login(app: AppHandle) {
-    let local_window = tauri::WindowBuilder::new(
-        &app,
-        "panel_login",
-        tauri::WindowUrl::External("https://admin.jackz.me".parse().expect("bad url"))
-    )
-        .closable(false)
-        .title("Admin Panel Login")
-        .build().expect("window failed");
-    local_window.open_devtools();
+async fn fetch_element(data: State<'_, Mutex<AppData>>, namespace: String, id: String) -> Result<Option<overlay_manager::UIElement>, String> {
+    let url = {
+        let mut data = data.lock().unwrap();
+        let mut url = data.http_url.clone();
+        url.set_path(&format!("/elements/{namespace}/{id}"));
+        url
+    };
+    let response = reqwest::get(url)
+        .await
+        .map_err(|e| e.to_string())?;
+    if response.status() == StatusCode::NOT_FOUND {
+        Ok(None)
+    } else {
+        let elem = response.error_for_status()
+            .map_err(|e| e.to_string())?
+            .json().await
+            .map_err(|e| e.to_string())?;
+        // TODO: cache
+        Ok(Some(elem))
+    }
 }
 
 #[tauri::command]
