@@ -22,6 +22,7 @@ export enum ElemVisibility {
 export type ElemType = "text" | "list:text" | "list:dynamic" 
 export interface BaseElement {
     // id: string,
+    active: boolean
     type: ElemType,
     zIndex?: number,
     defaults?: ElementState,
@@ -79,9 +80,18 @@ export interface ElementState {
 
 export type StateKeys = keyof ElementState | "_reset"
 
-export type ManagerResponseType = "manager_disconnected" | "client_joined" | "client_disconnected" | "game_data" | "authorized" | "register_ui"
+export type ManagerResponseType = "manager_connected" | "manager_disconnected" | "joined_server" | "left_server" | "game_data" | "authorized" | "update_ui" | "register_temp_ui"
 interface ManagerResponseBase {
     type: ManagerResponseType
+}
+export interface ManagerResponseJoined extends ManagerResponseBase {
+    type: "joined_server",
+    server_id: string,
+    server_name: string,
+    server_ip: string
+}
+export interface ManagerResponseLeft extends ManagerResponseBase {
+    type: "left_server",
 }
 export interface ManagerResponseAuthorized extends ManagerResponseBase {
     type: "authorized",
@@ -89,14 +99,23 @@ export interface ManagerResponseAuthorized extends ManagerResponseBase {
     auth_token: string,
     user: any //SteamUser
 }
-
+export interface ManagerResponseConnected {
+    type: "manager_connected"
+}
 export interface ManagerResponseDisconnected {
     type: "manager_disconnected"
 }
-export interface ManagerResponseRegisterUI {
-    type: "register_ui",
-    namespace: string,
-    id: string
+export interface ManagerResponseUpdateUI {
+    type: "update_ui",
+    namespace: string | null,
+    elem_id: string,
+    visibility: boolean,
+    variables: Record<string, any>
 }
-
-export type ManagerResponse = ManagerResponseAuthorized | ManagerResponseDisconnected | ManagerResponseRegisterUI
+export interface ManagerResponseRegisterTempUI {
+    type: "register_temp_ui",
+    elem_id: string,
+    expires_seconds: number | null, 
+    element: UIElement
+}
+export type ManagerResponse = ManagerResponseJoined | ManagerResponseLeft | ManagerResponseAuthorized | ManagerResponseDisconnected | ManagerResponseUpdateUI | ManagerResponseRegisterTempUI | ManagerResponseConnected | ManagerResponseDisconnected

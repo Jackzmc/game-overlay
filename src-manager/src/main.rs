@@ -115,6 +115,7 @@ async fn main() {
         .route("/auth/login", get(route_steam_login))
         .route("/auth/callback", get(route_steam_callback))
         .route("/elements/:namespace/:id", get(route_get_element))
+        .route("/manage", get(route_manage_ui))
         .with_state(Arc::new(state));
 
     let listener = tokio::net::TcpListener::bind(*LISTEN_ADDRESS).await.unwrap();
@@ -211,7 +212,7 @@ async fn route_steam_callback(
         .map_err(|e| AppError::GenericServerError { message: e.to_string() })?;
     debug!("auth success, authorizing with manager");
     let mut manager = state.manager.lock().await;
-    manager.authorize_client(&query.id, steamid.clone()).await
+    manager.mark_client_authorized(&query.id, steamid.clone()).await
         .map_err(|e| AppError::GenericServerError { message: e.to_string() })?;
     Ok(RenderHtml("login_success", state.engine.clone(), json!({})))
 }
@@ -233,6 +234,14 @@ async fn route_get_element(
     } else {
         Err(AppError::EntityNotFound { message: format!("No element with the id {id} was found in the {namespace} namespace").to_string() })
     }
+}
+
+async fn route_manage_ui(
+    State(state): State<Arc<AppState>>,
+) -> impl IntoResponse {
+   RenderHtml("manage", state.engine.clone(), json!({
+
+    }))
 }
 
 #[derive(Serialize, Deserialize)]
@@ -432,7 +441,8 @@ async fn init_server_connection(mut ws: WebSocket, (mut tx, mut rx): (UnboundedS
     }
 
     // Cleanup server
-    let server = server.lock().await;
+    let mut server = server.lock().await;
+    server.notify_disconnect().await;
     let id = server.id();
     manager.lock().await.remove_server(&id);
     drop(server);

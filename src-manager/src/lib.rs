@@ -1,5 +1,6 @@
 use std::error::Error;
 use std::fmt;
+use std::net::IpAddr;
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -7,14 +8,16 @@ use serde::{Deserialize, Serialize};
 #[serde(rename_all = "snake_case")]
 /// Messages that are being sent to client (Client <- Manager)
 pub enum ClientIncomingRequest {
-    ClientJoined,
-    ClientDisconnected,
+    JoinedServer { server_id: String, server_name: String, server_ip: String },
+    LeftServer,
     GameData {}, // TODO: implement
     Authorized { steamid2: String, auth_token: String, user: SteamUser },
     // Manual activation for UI side:
     ManagerDisconnected,
     ManagerConnected,
-    RegisterUI { namespace: String, id: String }
+    RegisterTempUI { elem_id: String, expires_seconds: Option<u64>, element: UIElement },
+    // Clients will fetch UI if received (with visibility=true)
+    UpdateUI { namespace: Option<String>, elem_id: String, visibility: bool, variables: Value }
 }
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(tag = "type")]
@@ -40,8 +43,8 @@ pub enum ServerOutgoingEvent {
     PlayerJoined { steamid: String },
     PlayerLeft { steamid: String },
     GameState {}, // TODO: implement
-    Disconnecting,
-    RegisterTempUI { namespace: String, id: String, expires_seconds: Option<u64> }
+    RegisterTempUI { elem_id: String, expires_seconds: Option<u64>, element: UIElement },
+    UpdateUI { namespace: Option<String>, elem_id: String, variables: Value, visibility: bool }
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]

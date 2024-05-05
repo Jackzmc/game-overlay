@@ -1,13 +1,14 @@
 use std::collections::hash_map::Values;
 use std::collections::HashMap;
 use std::net::SocketAddr;
+use std::time::SystemTime;
 use axum::extract::ws::Message;
 use serde::{Deserialize, Serialize};
 use sqlx::{Executor, FromRow, MySqlPool, query};
 use steamid_ng::SteamID;
 use tokio::sync::mpsc::UnboundedSender;
 use uuid::Uuid;
-use overlay_manager::{ServerIncomingRequest, UIElement};
+use overlay_manager::{ClientIncomingRequest, ServerIncomingRequest, UIElement};
 use crate::manager::{Client, RequestError};
 use crate::POOL;
 
@@ -17,11 +18,16 @@ pub struct ServerInstance {
     id: String,
     clients: HashMap<SteamID, Client>,
     addr: SocketAddr,
-    ui_elements: HashMap<String, UIElement>,
-
+    ui_element_ids: Vec<String>,
+    elements_fetch_time: Option<SystemTime>
     // db: MySqlPool
 }
+
+const ELEMENT_CACHE_TIME: u64 = 90;
 impl ServerInstance {
+    pub fn next_id() -> Uuid {
+        Uuid::new_v4()
+    }
     pub fn with_id(addr: SocketAddr, tx: UnboundedSender<Message>, namespace: String, id: String) -> Self {
         Self {
             addr,
@@ -29,7 +35,8 @@ impl ServerInstance {
             namespace,
             id,
             clients: HashMap::new(),
-            ui_elements: HashMap::new(),
+            ui_element_ids: Vec::new(),
+            elements_fetch_time: None
         }
     }
     pub fn namespace(&self) -> &str { &self.namespace }
@@ -38,6 +45,7 @@ impl ServerInstance {
     pub fn clients(&self) -> Values<'_, SteamID, Client> {
         self.clients.values().into_iter()
     }
+    pub fn addr(&self) -> String { self.addr.to_string() }
 
     pub fn send_request(&self, request: &ServerIncomingRequest) -> Result<(), RequestError> {
         let json = serde_json::to_string(request).map_err(|_| RequestError::RequestNotSerializable)?;
@@ -79,13 +87,26 @@ impl ServerInstance {
 //         }
 //     }
 
-    fn _insert_element(&mut self, elem: Element) -> Result<&UIElement, String> {
+    fn _insert_element(&mut self, elem: Element) -> Result<UIElement, String> {
         let json: UIElement =  serde_json::from_str(&elem.data).map_err(|e| e.to_string())?;
-        self.ui_elements.insert(elem.id.clone(), json);
-        Ok(self.ui_elements.get(&elem.id).unwrap())
+        self.ui_element_ids.push(elem.id.clone());
+        Ok(json)
     }
 
-    pub async fn fetch_elements(&mut self) -> Result<Vec<UIElement>, String> {
+    pub async fn notify_disconnect(&mut self) {
+        for client in self.clients() {
+            let mut client = client.lock().await;
+            client._set_server(None);
+            client.send_request(&ClientIncomingRequest::LeftServer).unwrap();
+        }
+    }
+
+    pub async fn fetch_element_ids(&mut self) -> Result<Vec<String>, String> {
+        if let Some(last_fetch) = self.elements_fetch_time {
+            if SystemTime::now().duration_since(last_fetch).unwrap().as_secs() < ELEMENT_CACHE_TIME {
+                return Ok(self.ui_element_ids.clone());
+            }
+        }
         let pool = POOL.get().unwrap();
         let rows: Vec<Element> = sqlx::query_as("SELECT e.id, e.data FROM overlay_elements_servers es
     LEFT JOIN overlay_elements e ON e.id = es.element_id
@@ -94,12 +115,10 @@ WHERE es.namespace = ? AND es.server_id = ?")
             .bind(&self.id)
             .fetch_all(pool).await
             .map_err(|e| e.to_string())?;
-        let mut elements = Vec::new();
-        for row in rows {
-            let elem = self._insert_element(row)?;
-            elements.push(elem.clone())
+        for row in &rows {
+            self.ui_element_ids.push(row.id.clone());
         }
-        Ok(elements)
+        Ok(rows.iter().map(|r| r.id.to_string()).collect())
 
     }
 }
