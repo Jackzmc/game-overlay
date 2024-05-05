@@ -4,9 +4,11 @@
 )]
 
 mod manager;
+mod cache;
 
 use log::{debug, info, warn};
 use std::{env, fs};
+use std::collections::HashMap;
 use std::io::ErrorKind;
 use std::ops::Deref;
 use std::path::PathBuf;
@@ -43,7 +45,8 @@ struct AppData {
     manager: OverlayManager,
     config_file_path: PathBuf,
     config: AppConfig,
-    http_url: Url
+    http_url: Url,
+    element_cache: HashMap<String, overlay_manager::UIElement>
 }
 #[derive(Serialize, Deserialize)]
 pub struct AppConfig {
@@ -68,7 +71,8 @@ impl AppData {
             manager: Arc::new(Mutex::new(manager_inst)),
             config_file_path: config_path,
             config,
-            http_url
+            http_url,
+            element_cache: HashMap::new()
         }
     }
 

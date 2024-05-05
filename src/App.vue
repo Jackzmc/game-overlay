@@ -18,6 +18,9 @@
       </button>
     </div>
   </div>
+  <div class="notification is-danger is-light disconnected" v-if="!store.managerConnected">
+    <Icon icon="fa-exclamation-triangle ">Lost connection to server</Icon>
+  </div>
 </div>
 </template>
 
@@ -55,21 +58,23 @@ const ELEM_TYPE_MAP: Record<ElemType, any> = markRaw({
 })
 
 // type PartialBy<T, K extends keyof T> = Omit<T, K> & Partial<Pick<T, K>>
-function setElement(namespace: string | null, id: string, element: UIElement) {
+function setElement(namespace: string | null, id: string, element: UIElement): ElementData {
   const fullId = `${namespace??''}:${id}`
-  console.log(JSON.stringify(element))
+  console.debug(fullId, JSON.stringify(element))
   elementRegistry.value[fullId] = {
     component: markRaw(ELEM_TYPE_MAP[element.type]),
     element: element
   }
+  return elementRegistry.value[fullId] 
 }
-async function fetchElement(namespace: string, id: string): Promise<UIElement> {
+async function fetchElement(namespace: string, id: string): Promise<ElementData | undefined> {
   try {
-    const elem = await invoke("fetch_element", namespace, id)
-    return elem
+    const elem: UIElement = await invoke("fetch_element", { namespace, id })
+    return setElement(namespace, id, elem)
   } catch(err) {
     // TODO: throw better err
-    alert("fetchElement:" + err.message)
+    alert("fetchElement:" + (err as any).message)
+    return undefined
   }
 }
 
@@ -81,6 +86,7 @@ function test() {
       visibility: ElemVisibility.DisplayOnly,
       title: "Variable test",
     },
+    active: true,
     text: "* Time: %time%\n* Date: %date%\n* Hello %name%, your steamid is %steamid%\n* You are on: %server% (%serverip%)",
   })
   setElement(null, "test2", {
@@ -90,6 +96,7 @@ function test() {
       position: { x: 5, y: 250 },
       title: "test",
     },
+    active: true,
     text: "# markdown test\n**blah** blah blah\nlorem ipsum dolor sit amet"
   })
   setElement(null, "big_list", {
@@ -97,6 +104,7 @@ function test() {
     defaults: {
       title: "Big List",
     },
+    active: true,
     list: Array(15).fill(undefined).map((_, i) => {
       return {
         "title": `Element ${i}`,
@@ -110,6 +118,7 @@ function test() {
       position: { x: 400, y: 10 },
       title: "My List",
     },
+    active: true,
     list: [
       {
         "title": "Element 1",
@@ -209,19 +218,57 @@ async function registerShortcuts() {
     });
 }
 
+function clearServerUIs() {
+  console.debug("Clearing server and temp UIs")
+  for(const [id, data] of Object.entries(elementRegistry.value)) {
+    const [namespace, elemId] = id.split(":")
+    if(namespace != "global") {
+      delete elementRegistry.value[id]
+    }
+  }
+}
+
 async function onManagerData(payload: ManagerResponse) {
   console.debug("Got payload", payload.type, payload)
   switch(payload.type) {
+    case "joined_server": {
+      store.server = {
+        id: payload.server_id,
+        name: payload.server_name,
+        ip: payload.server_ip,
+      }
+      break;
+    }
+    case "left_server": {
+      clearServerUIs()
+      break;
+    }
     case "authorized": {
+      store.managerConnected = true
       store.authorize(payload.steamid2, payload.user)
       break;
     }
-    case "register_ui": {
-      // TODO: automatically do this manager side? idk
-      const elem = await fetchElement(payload.namespace, payload.id)
-      if(elem)
-        setElement(payload.namespace, payload.id, elem)
+    case "register_temp_ui": {
+      setElement(null, payload.elem_id, payload.element)
+      if(payload.expires_seconds) {
+        setTimeout(() => {
+          delete elementRegistry.value[`:${payload.elem_id}`]
+        }, 1000 * payload.expires_seconds)
+      }
       break;
+    }
+    case "update_ui": {
+      // TODO: automatically do this manager side? idk
+      const id = `${payload.namespace??''}:${payload.elem_id}`
+      let elem: ElementData | undefined = elementRegistry.value[id]
+      if(!elem && payload.namespace) elem = await fetchElement(payload.namespace, payload.elem_id)
+      if(!elem) return console.warn("No elem", payload)
+      elem.element.active = payload.visibility
+      break;
+    }
+    case "manager_connected": {
+      store.managerConnected = true
+      break
     }
     case "manager_disconnected": {
       store.managerConnected = false
@@ -247,6 +294,11 @@ onUnmounted(async() => {
 .procbox {
   position: fixed;
   bottom: 0;
+  right: 0;
+}
+.disconnected {
+  position: fixed;
+  top: 0;
   right: 0;
 }
 </style>

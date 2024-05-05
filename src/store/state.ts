@@ -9,8 +9,8 @@ export interface GlobalState {
   steamid?: string,
   steamUser?: SteamUser,
   server?: {
+    id: string,
     ip: string,
-    port: number,
     name: string
   }
 }
@@ -55,7 +55,7 @@ export const useGlobalState = defineStore('state', {
           steamid: state.steamid ?? "[Unauthorized]",
           name: state.steamUser?.personaname ?? state.steamid ?? "Unknown",
           server: state.server?.name,
-          serverip: state.server ? `${state.server.ip}:${state.server.port}` : '',
+          serverip: state.server?.ip,
           avatarurl: state.steamUser?.avatarfull
         }
       }

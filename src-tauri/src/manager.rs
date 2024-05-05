@@ -49,17 +49,17 @@ impl OverlayManagerInstance {
         })
     }
 
-    // Constantly tries to reconnect, with exponentionally longe delays, sleeping in between attempts
-    pub fn reconnect_smart(&mut self) {
+    // Tries to connect, and on failure returns an increasing delay. If successful, returns None
+    pub fn reconnect_delayed(&mut self) -> Option<Duration> {
         if self.reconnect().is_err() {
             let ms = (self.connect_attempts^2) as f32/2.0;
-            let sleep_time = Duration::from_secs_f32(ms);
-            std::thread::sleep(sleep_time);
+            return Some(Duration::from_secs_f32(ms))
         }
+        None
     }
 
     // two auth procedures: first time (get url) or token
-    pub fn begin_new_account(&mut self) -> Result<String, String> {
+    pub fn begin_client(&mut self) -> Result<String, String> {
         match self._authorize(None)? {
             overlay_manager::InitConnectionResPayload::PendingClientLogin { url } => Ok(url),
             other => Err(format!("manager returned unexpected response"))
@@ -127,7 +127,9 @@ pub fn start_manager_read_thread(window: Window, manager: OverlayManager) {
         {
             debug!("Starting initial connection to manager...", );
             let mut manager = manager.lock().unwrap();
-            manager.reconnect_smart();
+            while let Some(duration) = manager.reconnect_delayed() {
+                sleep(duration);
+            }
             // TODO: send manager connected
             window.emit("manager", overlay_manager::ClientIncomingRequest::ManagerConnected).unwrap();
             if let Some(auth_token) = keyring.get_password().ok() {
@@ -137,7 +139,7 @@ pub fn start_manager_read_thread(window: Window, manager: OverlayManager) {
             } else {
                 debug!("creating auth window");
                 window.hide().unwrap();
-                let url = manager.begin_new_account().expect("failed to begin new account");
+                let url = manager.begin_client().expect("failed to begin new account");
                 webbrowser::open(&url).expect("could not open browser");
             }
             // let auth_window = WindowBuilder::new(&window.app_handle(), "auth_window", WindowUrl::External(url))
@@ -165,18 +167,23 @@ pub fn start_manager_read_thread(window: Window, manager: OverlayManager) {
             window.show().unwrap();
             // auth_window.close().unwrap();
         }
-
+        let mut was_disconnected = false;
         loop {
             let mut manager = manager.lock().unwrap();
             match manager.read::<overlay_manager::ClientIncomingRequest>() {
-                Ok(Some(response)) => {
-                    window.emit("manager", response).unwrap();
+                Ok(response) => {
+                    if let Some(response) = response {
+                        window.emit("manager", response).unwrap();
+                    }
+                    if was_disconnected {
+                        window.emit("manager", overlay_manager::ClientIncomingRequest::ManagerConnected).unwrap();
+                        was_disconnected = false;
+                    }
                 },
                 Err(e) => {
+                    was_disconnected = true;
                     window.emit("manager", overlay_manager::ClientIncomingRequest::ManagerDisconnected).unwrap();
-                    
                 },
-                _ => {}
             }
             // TODO: if disc
             drop(manager);

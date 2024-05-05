@@ -6,7 +6,7 @@ use std::ops::Deref;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 use axum::extract::ws::Message;
-use jwt::VerifyWithKey;
+use jwt::{SignWithKey, VerifyWithKey};
 use log::debug;
 use tokio::sync::Mutex;
 use serde::{Deserialize, Serialize};
@@ -63,6 +63,7 @@ pub struct ManagerInstance {
 }
 pub type Manager = Arc<Mutex<ManagerInstance>>;
 #[allow(unused)]
+// TODO: split into .clients, .servers?
 impl ManagerInstance {
     pub fn new(steam: SteamClient) -> Self {
         Self {
@@ -100,11 +101,11 @@ impl ManagerInstance {
             return Err(AuthFailure::InvalidAuthToken(Some("token issued in the future and is invalid".to_string())))
         }
         let steamid = SteamID::from_steam2(&claims.subject).map_err(|e| AuthFailure::InvalidAuthToken(None))?;
-        self.authorize_client(id, steamid).await?;
+        self.mark_client_authorized(id, steamid).await?;
         Ok(())
     }
     /// Marks a client as authorized, storing their steamid & details, and notifies client connection
-    pub async fn authorize_client(&mut self, id: &str, steamid: SteamID) -> Result<(), AuthFailure> {
+    pub async fn mark_client_authorized(&mut self, id: &str, steamid: SteamID) -> Result<(), AuthFailure> {
         debug!("authorizing: {}", id);
         let user = self.steam.get_user_details(steamid).await
             .map_err(|e| AuthFailure::General(e.to_string()))?;
@@ -162,6 +163,20 @@ impl ManagerInstance {
         Ok(server)
     }
 
+    // pub async fn create_server(&mut self, id: String) -> Result<String, String> {
+    //     let id = ServerInstance::next_id().to_string();
+    //     let claims = crate::manager::ServerTokenClaims {
+    //         namespace: "".to_string(),
+    //         subject: id.clone(),
+    //         issuer: "manager".to_string(),
+    //         issued_at: SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs(),
+    //         ip_addr: Some(addr.to_string()),
+    //     };
+    //     claims.sign_with_key(JWT_SECRET_KEY.deref()).map_err(|e| {
+    //         e.to_string()
+    //     })
+    // }
+
     pub fn remove_server(&mut self, id: &str) -> bool {
         self.servers.remove(id).is_some()
     }
@@ -183,8 +198,12 @@ impl ManagerInstance {
                 if let Some(client) = self.find_client_by_steamid(steamid) {
                     let mut client = client.lock().await;
                     client._set_server(Some(server.clone()));
-                    client.send_request(&ClientIncomingRequest::ClientJoined).unwrap();
-                    // TODO: fetch ui elements? or server should
+                    let server = server.lock().await;
+                    client.send_request(&ClientIncomingRequest::JoinedServer {
+                        server_id: server.id().to_string(),
+                        server_name: "[not implemented]".to_string(),
+                        server_ip: server.addr(),
+                    }).unwrap();
                 }
             },
             ServerOutgoingEvent::PlayerLeft { steamid} => {
@@ -193,15 +212,30 @@ impl ManagerInstance {
                 if let Some(client) = self.find_client_by_steamid(steamid) {
                     let mut client = client.lock().await;
                     client._set_server(None);
-                    client.send_request(&ClientIncomingRequest::ClientDisconnected).unwrap();
+                    client.send_request(&ClientIncomingRequest::LeftServer).unwrap();
                 }
             },
-            ServerOutgoingEvent::Disconnecting => {
+            ServerOutgoingEvent::RegisterTempUI { elem_id, expires_seconds, element } => {
                 let server = server.lock().await;
                 for client in server.clients() {
                     let mut client = client.lock().await;
-                    client._set_server(None);
-                    client.send_request(&ClientIncomingRequest::ClientDisconnected).unwrap();
+                    client.send_request(&ClientIncomingRequest::RegisterTempUI {
+                        elem_id: elem_id.clone(),
+                        expires_seconds: expires_seconds.clone(),
+                        element: element.clone()
+                    }).unwrap();
+                }
+            },
+            ServerOutgoingEvent::UpdateUI { namespace, elem_id, variables, visibility } => {
+                let server = server.lock().await;
+                for client in server.clients() {
+                    let mut client = client.lock().await;
+                    client.send_request(&ClientIncomingRequest::UpdateUI {
+                        namespace: namespace.clone(),
+                        elem_id: elem_id.clone(),
+                        variables: variables.clone(),
+                        visibility: *visibility
+                    }).unwrap();
                 }
             },
             // ServerOutgoingEvent::GameState {} => {}
