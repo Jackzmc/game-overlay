@@ -7,7 +7,7 @@ use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 use axum::extract::ws::Message;
 use jwt::{SignWithKey, VerifyWithKey};
-use log::debug;
+use log::{debug, warn};
 use tokio::sync::Mutex;
 use serde::{Deserialize, Serialize};
 use sqlx::{MySqlPool, Pool};
@@ -95,24 +95,24 @@ impl ManagerInstance {
     }
     pub async fn authorize_client_token(&mut self, id: &str, auth_token: String) -> Result<(), AuthFailure> {
         let claims: ClientTokenClaims = auth_token.verify_with_key(JWT_SECRET_KEY.deref())
-            .map_err(|e| AuthFailure::InvalidAuthToken(Some(e.to_string())))?;
+            .map_err(|e| AuthFailure::InvalidAuthToken { message: Some(e.to_string()) })?;
         let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
         if claims.issued_at > now {
-            return Err(AuthFailure::InvalidAuthToken(Some("token issued in the future and is invalid".to_string())))
+            return Err(AuthFailure::InvalidAuthToken { message: Some("token issued in the future and is invalid".to_string())})
         }
-        let steamid = SteamID::from_steam2(&claims.subject).map_err(|e| AuthFailure::InvalidAuthToken(None))?;
+        let steamid = SteamID::from_steam2(&claims.subject).map_err(|e| AuthFailure::InvalidAuthToken { message: None })?;
         self.mark_client_authorized(id, steamid).await?;
         Ok(())
     }
     /// Marks a client as authorized, storing their steamid & details, and notifies client connection
     pub async fn mark_client_authorized(&mut self, id: &str, steamid: SteamID) -> Result<(), AuthFailure> {
-        debug!("authorizing: {}", id);
+        debug!("mark_client_authorized: {} [{}]", id, steamid.steam2());
         let user = self.steam.get_user_details(steamid).await
-            .map_err(|e| AuthFailure::General(e.to_string()))?;
+            .map_err(|e| AuthFailure::General { message: e.to_string() })?;
         let client = self.clients.get(id).ok_or_else(|| AuthFailure::ObjectNotFound)?;
         let mut client = client.lock().await;
         client._set_steamid(steamid);
-        let token = client.generate_auth_token().map_err(|e| AuthFailure::General(e))?;
+        let token = client.generate_auth_token().map_err(|e| AuthFailure::General { message: e })?;
         client.send_request(&ClientIncomingRequest::Authorized {
             steamid2: steamid.steam2(),
             auth_token: token,
@@ -152,10 +152,10 @@ impl ManagerInstance {
 
     pub async fn try_authorize_server(&mut self, addr: SocketAddr, tx: UnboundedSender<Message>, auth_token: String) -> Result<Server, AuthFailure> {
         let claims: ServerTokenClaims = auth_token.verify_with_key(JWT_SECRET_KEY.deref())
-            .map_err(|e| AuthFailure::InvalidAuthToken(Some(e.to_string())))?;
+            .map_err(|e| AuthFailure::InvalidAuthToken { message: Some(e.to_string()) })?;
         let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
         if claims.issued_at > now {
-            return Err(AuthFailure::InvalidAuthToken(Some("token issued in the future and is invalid".to_string())))
+            return Err(AuthFailure::InvalidAuthToken { message: Some("token issued in the future and is invalid".to_string()) })
         }
         let server = ServerInstance::with_id(addr, tx, claims.namespace, claims.subject.clone());
         let server = Arc::new(Mutex::new(server));
@@ -196,14 +196,21 @@ impl ManagerInstance {
                 let steamid = SteamID::from_steam2(steamid).map_err(|_| RequestError::InvalidData)?;
                 // If there is no client with that steamid, ignore it, they aren't using overlay
                 if let Some(client) = self.find_client_by_steamid(steamid) {
+                    let mut server_inst = server.lock().await;
+                    server_inst.add_client(client.clone()).await;
+                    let server_id = server_inst.id().to_string();
+                    let server_ip = server_inst.addr();
+                    drop(server_inst);
+
                     let mut client = client.lock().await;
                     client._set_server(Some(server.clone()));
-                    let server = server.lock().await;
                     client.send_request(&ClientIncomingRequest::JoinedServer {
-                        server_id: server.id().to_string(),
+                        server_id,
                         server_name: "[not implemented]".to_string(),
-                        server_ip: server.addr(),
+                        server_ip
                     }).unwrap();
+                } else {
+                    warn!("PlayerJoined but player was not found: {}", steamid.steam2());
                 }
             },
             ServerOutgoingEvent::PlayerLeft { steamid} => {
@@ -214,23 +221,29 @@ impl ManagerInstance {
                     client._set_server(None);
                     client.send_request(&ClientIncomingRequest::LeftServer).unwrap();
                 }
+                let mut server = server.lock().await;
+                server.remove_client(&steamid);
             },
-            ServerOutgoingEvent::RegisterTempUI { elem_id, expires_seconds, element } => {
+            ServerOutgoingEvent::RegisterTempUi { elem_id, expires_seconds, element } => {
                 let server = server.lock().await;
+                let mut c = 0;
                 for client in server.clients() {
                     let mut client = client.lock().await;
-                    client.send_request(&ClientIncomingRequest::RegisterTempUI {
+                    debug!("forwarding register temp ui to client {}", client.id());
+                    client.send_request(&ClientIncomingRequest::RegisterTempUi {
                         elem_id: elem_id.clone(),
                         expires_seconds: expires_seconds.clone(),
                         element: element.clone()
                     }).unwrap();
+                    c += 1;
                 }
+                debug!("forwarded tmp ui to {} clients", c);
             },
-            ServerOutgoingEvent::UpdateUI { namespace, elem_id, variables, visibility } => {
+            ServerOutgoingEvent::UpdateUi { namespace, elem_id, variables, visibility } => {
                 let server = server.lock().await;
                 for client in server.clients() {
                     let mut client = client.lock().await;
-                    client.send_request(&ClientIncomingRequest::UpdateUI {
+                    client.send_request(&ClientIncomingRequest::UpdateUi {
                         namespace: namespace.clone(),
                         elem_id: elem_id.clone(),
                         variables: variables.clone(),

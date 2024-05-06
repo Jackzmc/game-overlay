@@ -302,7 +302,7 @@ async fn init_connection(mut ws: WebSocket, addr: SocketAddr, manager: Manager) 
                 Err(err) => {
                     warn!("invalid payload: {}", err);
                     send(&mut ws, InitConnectionResPayload::InvalidPayload { message: Some(err.to_string()) }).await;
-                    ws.close().await.unwrap();
+                    ws.close().await.ok();
                 }
             }
         }
@@ -323,7 +323,7 @@ async fn login_connection(mut ws: WebSocket, manager: Manager, req: InitConnecti
                     if let Some(token) = auth_token {
                         if let Err(err) = mngr.authorize_client_token(&id, token).await {
                             // Cleanup ID
-                            send(&mut ws, InitConnectionResPayload::AuthError(AuthFailure::General(err.to_string()))).await;
+                            send(&mut ws, InitConnectionResPayload::AuthError(AuthFailure::General { message: err.to_string() })).await;
                             mngr.remove_client(&id);
                             return;
                         }
@@ -347,6 +347,7 @@ async fn login_connection(mut ws: WebSocket, manager: Manager, req: InitConnecti
                         let server_inst = server.lock().await;
                         server_inst.send_request(&ServerIncomingRequest::Authorized).unwrap();
                     }
+                    debug!("server authorized");
                     init_server_connection(ws, (tx, rx), manager, server).await;
                 },
                 Err(e) => {
@@ -381,9 +382,9 @@ async fn init_client_connection(mut ws: WebSocket, (mut tx, mut rx): (UnboundedS
         // Read incoming messages from websocket:
         tokio::task::spawn(async move {
             while let Some(Ok(message)) = ws_rx.next().await {
-                debug!("got message from client");
                 match serde_json::from_str::<ClientOutgoingEvent>(&message.into_text().unwrap()) {
                     Ok(event) => {
+                        debug!("got message from client {:?}", event);
                         let mut manager = manager.lock().await;
                         if let Err(err) = manager.on_client_event(&event, client.clone()).await {
                             error!("on_client_event error: {:?}", err);
@@ -418,9 +419,9 @@ async fn init_server_connection(mut ws: WebSocket, (mut tx, mut rx): (UnboundedS
         let manager = manager.clone();
         tokio::task::spawn(async move {
             while let Some(Ok(message)) = ws_rx.next().await {
-                debug!("got message from server");
                 match serde_json::from_str::<ServerOutgoingEvent>(&message.into_text().unwrap()) {
                     Ok(event) => {
+                        debug!("got message from server {:?}", event);
                         let mut manager = manager.lock().await;
                         if let Err(err) = manager.on_server_event(&event, server.clone()).await {
                             error!("on_server_event error: {:?}", err);

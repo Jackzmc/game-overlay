@@ -1,3 +1,4 @@
+use std::io::ErrorKind;
 use std::net::TcpStream;
 use std::sync::{Arc, Mutex};
 use std::thread::sleep;
@@ -76,7 +77,7 @@ impl OverlayManagerInstance {
                     })
                 },
                 Ok(Some(_)) => return Err("manager sent unexpected data".to_string()),
-                Err(e) => return Err(e),
+                Err(e) => return Err(e.to_string()),
                 Ok(None) => {}
             }
         }
@@ -90,7 +91,7 @@ impl OverlayManagerInstance {
         self.send(overlay_manager::InitConnectionReqPayload::Client { auth_token }.into())?;
         // let start_auth = Instant::now();
         loop {
-            if let Some(response) = self.read::<overlay_manager::InitConnectionResPayload>()? {
+            if let Some(response) = self.read::<overlay_manager::InitConnectionResPayload>().map_err(|e| e.to_string())? {
                 return Ok(response)
             }
         }
@@ -107,14 +108,15 @@ impl OverlayManagerInstance {
     }
 
     /// Reads from socket
-    pub fn read<T: DeserializeOwned> (&mut self) -> Result<Option<T>, String> {
+    pub fn read<T: DeserializeOwned> (&mut self) -> Result<Option<T>, tungstenite::Error> {
         if self.socket.is_none() {
-            return Err("Not connected to socket".to_string());
+            return Err(tungstenite::Error::ConnectionClosed);
         }
         // send disconnect
-        let msg = self.socket.as_mut().unwrap().read().map_err(|e| e.to_string())?;
+        let msg = self.socket.as_mut().unwrap().read()?;
         Ok(if msg.is_text() {
-            Some(serde_json::from_str(&msg.into_text().unwrap()).map_err(|e| e.to_string())?)
+            // TODO: make own error type for this cause
+            Some(serde_json::from_str(&msg.into_text().unwrap()).expect("could not serialize read()"))
         } else {
             None
         })
@@ -167,7 +169,6 @@ pub fn start_manager_read_thread(window: Window, manager: OverlayManager) {
             window.show().unwrap();
             // auth_window.close().unwrap();
         }
-        let mut was_disconnected = false;
         loop {
             let mut manager = manager.lock().unwrap();
             match manager.read::<overlay_manager::ClientIncomingRequest>() {
@@ -175,14 +176,16 @@ pub fn start_manager_read_thread(window: Window, manager: OverlayManager) {
                     if let Some(response) = response {
                         window.emit("manager", response).unwrap();
                     }
-                    if was_disconnected {
-                        window.emit("manager", overlay_manager::ClientIncomingRequest::ManagerConnected).unwrap();
-                        was_disconnected = false;
-                    }
                 },
                 Err(e) => {
-                    was_disconnected = true;
-                    window.emit("manager", overlay_manager::ClientIncomingRequest::ManagerDisconnected).unwrap();
+                    eprintln!("read error: {}", e);
+                    if let tungstenite::Error::Io(ref io) = e {
+                        window.emit("manager", overlay_manager::ClientIncomingRequest::ManagerDisconnected).unwrap();
+                        while let Some(duration) = manager.reconnect_delayed() {
+                            sleep(duration);
+                        }
+                        window.emit("manager", overlay_manager::ClientIncomingRequest::ManagerConnected).unwrap();
+                    }
                 },
             }
             // TODO: if disc
