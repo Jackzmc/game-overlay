@@ -240,6 +240,9 @@ impl ManagerInstance {
                 debug!("forwarded tmp ui to {} clients", c);
             },
             ServerOutgoingEvent::UpdateUi { namespace, elem_id, variables, visibility } => {
+                if elem_id.is_none() && namespace.is_none() {
+                    return Err(RequestError::InvalidData);
+                }
                 let server = server.lock().await;
                 for client in server.clients() {
                     let mut client = client.lock().await;
