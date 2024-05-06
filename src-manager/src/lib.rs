@@ -15,9 +15,9 @@ pub enum ClientIncomingRequest {
     // Manual activation for UI side:
     ManagerDisconnected,
     ManagerConnected,
-    RegisterTempUI { elem_id: String, expires_seconds: Option<u64>, element: UIElement },
+    RegisterTempUi { elem_id: String, expires_seconds: Option<u64>, element: UIElement },
     // Clients will fetch UI if received (with visibility=true)
-    UpdateUI { namespace: Option<String>, elem_id: String, visibility: bool, variables: Value }
+    UpdateUi { namespace: Option<String>, elem_id: String, visibility: bool, variables: Value }
 }
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(tag = "type")]
@@ -43,8 +43,8 @@ pub enum ServerOutgoingEvent {
     PlayerJoined { steamid: String },
     PlayerLeft { steamid: String },
     GameState {}, // TODO: implement
-    RegisterTempUI { elem_id: String, expires_seconds: Option<u64>, element: UIElement },
-    UpdateUI { namespace: Option<String>, elem_id: String, variables: Value, visibility: bool }
+    RegisterTempUi { elem_id: String, expires_seconds: Option<u64>, element: UIElement },
+    UpdateUi { namespace: Option<String>, elem_id: String, variables: Value, visibility: bool }
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -66,7 +66,7 @@ pub enum InitConnectionReqPayload {
 
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-#[serde(tag = "result")]
+#[serde(tag = "error")]
 pub enum InitConnectionResPayload {
     PendingClientLogin { url: String },
     ClientAuthorized,
@@ -103,9 +103,9 @@ impl Into<TungsteniteMessage> for InitConnectionReqPayload {
 #[serde(rename_all = "snake_case")]
 #[serde(tag = "reason")]
 pub enum AuthFailure {
-    InvalidAuthToken(Option<String>),
+    InvalidAuthToken { message: Option<String> },
     Unknown,
-    General(String),
+    General { message: String },
     Timeout,
     ObjectNotFound
 }
@@ -113,9 +113,9 @@ impl Error for AuthFailure {}
 impl fmt::Display for AuthFailure {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            AuthFailure::General(msg) => write!(f, "{}", msg),
-            AuthFailure::InvalidAuthToken(msg) => {
-                if let Some(msg) = msg {
+            AuthFailure::General { message} => write!(f, "{}", message),
+            AuthFailure::InvalidAuthToken { message} => {
+                if let Some(msg) = message {
                     write!(f, "{}", msg)
                 } else {
                     write!(f, "auth token is either invalid or unauthorized")

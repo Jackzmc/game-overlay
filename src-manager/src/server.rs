@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::time::SystemTime;
 use axum::extract::ws::Message;
+use log::debug;
 use serde::{Deserialize, Serialize};
 use sqlx::{Executor, FromRow, MySqlPool, query};
 use steamid_ng::SteamID;
@@ -45,7 +46,7 @@ impl ServerInstance {
     pub fn clients(&self) -> Values<'_, SteamID, Client> {
         self.clients.values().into_iter()
     }
-    pub fn addr(&self) -> String { self.addr.to_string() }
+    pub fn addr(&self) -> String { self.addr.ip().to_string() }
 
     pub fn send_request(&self, request: &ServerIncomingRequest) -> Result<(), RequestError> {
         let json = serde_json::to_string(request).map_err(|_| RequestError::RequestNotSerializable)?;
@@ -57,11 +58,16 @@ impl ServerInstance {
     }
     pub async fn add_client(&mut self, client: Client) -> Result<(), ClientNotAuthorized> {
         if let Some(id) = client.lock().await.steamid() {
+            debug!("{}: add_client {}", self.id, id.steam2());
             self.clients.insert(id, client.clone());
             Ok(())
         } else {
             Err(ClientNotAuthorized)
         }
+    }
+    pub async fn remove_client(&mut self, id: &SteamID) -> bool {
+        debug!("{}: remove_client {}", self.id, id.steam2());
+        self.clients.remove(id).is_some()
     }
 
     // Grabs an element from cache or fetches it

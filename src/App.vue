@@ -272,6 +272,7 @@ async function onManagerData(payload: ManagerResponse) {
     }
     case "manager_disconnected": {
       store.managerConnected = false
+      store.server = undefined
       break;
     }
   }

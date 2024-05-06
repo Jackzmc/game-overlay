@@ -173,6 +173,10 @@ fn start_process_check_thread(window: tauri::Window) {
                 }
             };
             let our_pid = std::process::id() as u64;
+            if active_window.process_id == our_pid {
+                // Ignore our window
+                continue;
+            }
             trace!("our_pid={our_pid} active_window pid={}", active_window.process_id);
 
             let mut data = state.lock().unwrap();
