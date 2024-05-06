@@ -17,7 +17,7 @@ pub enum ClientIncomingRequest {
     ManagerConnected,
     RegisterTempUi { elem_id: String, expires_seconds: Option<u64>, element: UIElement },
     // Clients will fetch UI if received (with visibility=true)
-    UpdateUi { namespace: Option<String>, elem_id: String, visibility: bool, variables: Value }
+    UpdateUi { namespace: Option<String>, elem_id: Option<String>, visibility: bool, variables: Value }
 }
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(tag = "type")]
@@ -44,7 +44,7 @@ pub enum ServerOutgoingEvent {
     PlayerLeft { steamid: String },
     GameState {}, // TODO: implement
     RegisterTempUi { elem_id: String, expires_seconds: Option<u64>, element: UIElement },
-    UpdateUi { namespace: Option<String>, elem_id: String, variables: Value, visibility: bool }
+    UpdateUi { namespace: Option<String>, elem_id: Option<String>, variables: Value, visibility: bool }
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
