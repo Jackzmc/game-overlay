@@ -381,7 +381,7 @@ async fn init_client_connection(mut ws: WebSocket, (mut tx, mut rx): (UnboundedS
                         }
                     },
                     Err(e) => {
-                        tx.send(InitConnectionResPayload::InvalidPayload { message: Some(e.to_string()) }.into()).unwrap();
+                        tx.send(InitConnectionResPayload::InvalidPayload { message: Some(e.to_string()) }.into()).ok();
                     }
                 }
             }
@@ -418,7 +418,7 @@ async fn init_server_connection(mut ws: WebSocket, (mut tx, mut rx): (UnboundedS
                         }
                     },
                     Err(e) => {
-                        tx.send(InitConnectionResPayload::InvalidPayload { message: Some(e.to_string()) }.into()).unwrap();
+                        tx.send(InitConnectionResPayload::InvalidPayload { message: Some(e.to_string()) }.into()).ok();
                     }
                 }
             }
@@ -438,6 +438,11 @@ async fn init_server_connection(mut ws: WebSocket, (mut tx, mut rx): (UnboundedS
     drop(server);
 }
 async fn send(ws: &mut WebSocket, response: InitConnectionResPayload) -> bool {
-    let json = serde_json::to_string(&response).unwrap();
-    ws.send(Message::Text(json)).await.is_ok()
+    match serde_json::to_string(&response) {
+        Ok(json) => {
+            ws.send(Message::Text(json)).await.is_ok()
+        },
+        Err(e) => false
+    }
+
 }
