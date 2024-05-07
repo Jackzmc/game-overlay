@@ -5,6 +5,7 @@
       :is="elem.component" 
       :elem="elem.element" 
       :state="elementStates[id]"
+      :official="id.startsWith('system')"
       @state="(key: keyof ElementState, value: any) => updateState(id, key, value)"
     />
   </div>
@@ -35,6 +36,7 @@ import TextListElement from './components/elements/TextListElement.vue';
 import TextElement from './components/elements/TextElement.vue';
 import { ActionFlags } from './types';
 import { useGlobalState } from './store/state.ts';
+import { computed } from '@vue/reactivity';
 
 const TAURI_AVAILABLE = window.__TAURI_METADATA__ != undefined
 const store = useGlobalState()
@@ -43,6 +45,7 @@ const store = useGlobalState()
 let proc = ref()
 
 interface ElementData {
+  id: string,
   component: any,
   element: UIElement
 }
@@ -50,6 +53,12 @@ interface ElementData {
 let elementStates = ref<Record<string, ElementState>>({})
 let elementRegistry = ref<Record<string, ElementData>>({})
 let elementsContainer = ref()
+let trustedServerIds = ref<Record<string, boolean>>({})
+
+const isServerTrusted = computed(() => {
+  if(!store.server) return undefined
+  return trustedServerIds.value[store.server.id]
+})
 
 const ELEM_TYPE_MAP: Record<ElemType, any> = markRaw({
   "list:text": TextListElement,
@@ -62,6 +71,7 @@ function setElement(namespace: string | null, id: string, element: UIElement): E
   const fullId = `${namespace??''}:${id}`
   console.debug(fullId, JSON.stringify(element))
   elementRegistry.value[fullId] = {
+    id: fullId,
     component: markRaw(ELEM_TYPE_MAP[element.type]),
     element: element
   }
@@ -79,6 +89,19 @@ async function fetchElement(namespace: string, id: string): Promise<ElementData 
 }
 
 function test() {
+  setElement("system", "trust_server", {
+    type: "text",
+    defaults: {
+      position: { x: 20, y: 20 },
+      opacity: 1.0,
+      visibility: ElemVisibility.DisplayOnly,
+      title: "Server Not Trusted",
+      bgColor: { r: 255, g: 172, b: 66 }
+    },
+    zIndex: 10,
+    active: true,
+    template: "<div class='has-text-black has-text-centered'><h1>Trust Server</h1><p>You are connected to <b> {{ server.name }}</b> ({{ server.ip }}) for the first time. No elements will be loaded until you trust this server.</p><br><p>Do you trust this server?</p><br><div class='buttons is-centered'><div class='button is-info'>Trust Server</div><div class='button'>Dismiss</div></div></div>",
+  })
   setElement(null, "test", {
     type: "text",
     defaults: {
@@ -87,7 +110,7 @@ function test() {
       title: "Variable test",
     },
     active: true,
-    text: "* Time: %time%\n* Date: %date%\n* Hello %name%, your steamid is %steamid%\n* You are on: %server% (%serverip%)",
+    template: "* Time: %time%\n* Date: %date%\n* Hello %name%, your steamid is %steamid%\n* You are on: %server_name% (%server_ip%)",
   })
   setElement(null, "test2", {
     type: "text",
@@ -97,7 +120,7 @@ function test() {
       title: "test",
     },
     active: true,
-    text: "# markdown test\n**blah** blah blah\nlorem ipsum dolor sit amet"
+    template: "<a href='https://google.com'>Malicious Link</a>&nbsp;&nbsp;<a href='javascript:alert(1)'>Alert</a> <div class='box'>test</div> <img src='https://cdn.jackz.me/img/steve.png' />"
   })
   setElement(null, "big_list", {
     type: "list:text",
@@ -160,7 +183,7 @@ function updateState(id: string, key: StateKeys, value: any) {
     if(!elementStates.value[id]) elementStates.value[id] = {}
     elementStates.value[id][key] = value
   }
-  saveElements()
+  saveData()
 }
 
 setInterval(() => {
@@ -168,21 +191,25 @@ setInterval(() => {
 }, 1000)
 
 
-function saveElements() {
+function saveData() {
   localStorage.setItem("elem_data", JSON.stringify(elementStates.value))
+  localStorage.setItem("trusted_servers", JSON.stringify(trustedServerIds.value))
 }
 
-function loadElements() {
-  const data = localStorage.getItem("elem_data")
-  if(data) {
+function loadData() {
+  let data = localStorage.getItem("elem_data")
+  if(data)
     elementStates.value = JSON.parse(data)
-  }
+  data = localStorage.getItem("trusted_servers")
+  if(data)
+    trustedServerIds.value = JSON.parse(data)
 }
 
 onMounted(async() => {
-  loadElements()
+  loadData()
   test()
   // render()
+  const query = new URLSearchParams(window.location.search)
   if(TAURI_AVAILABLE) {
     await listen("manager", ({ payload }) => {
       onManagerData(payload as ManagerResponse)
@@ -197,7 +224,8 @@ onMounted(async() => {
     }
   } else {
     document.body.style.backgroundColor = "rebeccapurple"
-    store.interactable = true
+    store.interactable = (query.get("interact") ?? 1) == 1
+    store.managerConnected = true
   }
   console.info("Mount done")
 
@@ -237,6 +265,7 @@ async function onManagerData(payload: ManagerResponse) {
         name: payload.server_name,
         ip: payload.server_ip,
       }
+      
       break;
     }
     case "left_server": {

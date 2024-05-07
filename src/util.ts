@@ -3,6 +3,26 @@ import { createDirectives } from 'marked-directive'
 import DOMPurify from 'dompurify'
 import { Color } from './types.ts'
 
+DOMPurify.addHook('afterSanitizeAttributes', function (node) {
+  // Set text node content to uppercase
+  if (node.nodeName && node.nodeName.toLowerCase() === 'a') {
+    const href = node.getAttribute('href')
+    if(href && !node.hasAttribute('onclick')) {
+        node.setAttribute('target', '_blank')
+        node.setAttribute('onclick', `return confirm("Are you sure you want to navigate to ${href}?")`)
+    }
+  }
+});
+
+export function sanitize(content: string) {
+  return DOMPurify.sanitize(content)
+}
+export function useTemplate(template: HandlebarsTemplateDelegate, variables: Record<string, any>) {
+  return DOMPurify.sanitize(template(variables), {
+      SANITIZE_NAMED_PROPS: true,
+      ALLOWED_TAGS: ['b', 'pre', 'i', 'em', 'strong', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'p', 'div', 'img', 'a'], ALLOWED_ATTR: ['style','class', 'href']
+  })
+}
 
 const marked = new Marked()
   .use(createDirectives())

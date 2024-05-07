@@ -48,7 +48,7 @@ use overlay_manager::{AuthFailure, ClientOutgoingEvent, InitConnectionReqPayload
 use crate::server::Element;
 
 type QueryMap = HashMap<String, String>;
-static CLIENT_AUTH_TIMEOUT: Duration = Duration::from_secs(60 * 4);
+static CLIENT_AUTH_TIMEOUT: Duration = Duration::from_secs(60 * 3);
 static LISTEN_ADDRESS: Lazy<SocketAddr> = Lazy::new(|| std::env::var("LISTEN_HOST").unwrap_or_else(|_| "127.0.0.1:3011".to_string())
     .parse().expect("bad LISTEN_HOST"));
 static PUBLIC_URL: Lazy<String> = Lazy::new(|| std::env::var("PUBLIC_URL").unwrap_or_else(|_| "http://localhost:3011".to_string()) );
@@ -365,7 +365,7 @@ async fn wait_for_client_auth(client: Client) {
         if client.is_authorized() {
             break;
         }
-        tokio::time::sleep(Duration::from_secs(2)).await;
+        tokio::time::sleep(Duration::from_secs(5)).await;
         tokio::task::yield_now().await;
     }
 }

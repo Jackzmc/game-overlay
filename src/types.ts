@@ -9,7 +9,12 @@ export enum ElemFlags {
     ShowOnlyOnDeath = 2,
     // Show when not dead
     ShowOnlyOnAlive = 4
-
+}
+export enum ElemAlignment {
+    TopLeft,
+    TopRight,
+    BottomLeft,
+    BottomRight
 }
 export enum ElemVisibility {
     Always = 0,
@@ -24,6 +29,7 @@ export interface BaseElement {
     // id: string,
     active: boolean
     type: ElemType,
+    alignment?: ElemAlignment,
     zIndex?: number,
     defaults?: ElementState,
     flags?: ElemFlags,
@@ -31,7 +37,7 @@ export interface BaseElement {
 
 export interface TextElement extends BaseElement {
     type: "text",
-    text: string
+    template: string
 }
 
 export interface TextListElement extends BaseElement {

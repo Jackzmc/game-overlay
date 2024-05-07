@@ -5,11 +5,11 @@ import { createPinia } from 'pinia'
 import App from "./App.vue";
 
 import { library } from '@fortawesome/fontawesome-svg-core'
-import { faEllipsis, faUpRightAndDownLeftFromCenter, faPencil, faEye, faEyeSlash, faExclamationTriangle } from '@fortawesome/free-solid-svg-icons'
+import { faEllipsis, faUpRightAndDownLeftFromCenter, faPencil, faEye, faEyeSlash, faExclamationTriangle, faExclamationCircle } from '@fortawesome/free-solid-svg-icons'
 import Icon from './components/Icon.vue'
 
 
-library.add(faEllipsis, faUpRightAndDownLeftFromCenter, faPencil, faEye, faEyeSlash, faExclamationTriangle)
+library.add(faEllipsis, faUpRightAndDownLeftFromCenter, faPencil, faEye, faEyeSlash, faExclamationTriangle, faExclamationCircle)
 
 
 const pinia = createPinia()

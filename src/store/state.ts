@@ -54,9 +54,11 @@ export const useGlobalState = defineStore('state', {
           date: state.date,
           steamid: state.steamid ?? "[Unauthorized]",
           name: state.steamUser?.personaname ?? state.steamid ?? "Unknown",
-          server: state.server?.name,
-          serverip: state.server?.ip,
-          avatarurl: state.steamUser?.avatarfull
+          server: state.server ? {
+            name: state.server.name,
+            ip: state.server.ip,
+          } : undefined,
+          avatar_url: state.steamUser?.avatarfull
         }
       }
     },
