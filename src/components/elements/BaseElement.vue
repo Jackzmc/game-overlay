@@ -1,5 +1,5 @@
 <template>
-<div :class="['card','root',{'invisible': store.interactable&&visibility==ElemVisibility.InteractableOnly}]" ref="root" :style="style as StyleValue"@mouseleave="dropdownActive = false" v-if="isVisible">
+<div :class="['card','root',{'official': official, 'invisible': store.interactable&&visibility==ElemVisibility.InteractableOnly}]" ref="root" :style="style as StyleValue"@mouseleave="dropdownActive = false" v-if="isVisible">
     <header ref="header" class="card-header" :style="{cursor: store.editable?'move':'inherit'}" v-if="store.interactable">
         <p :class="['card-header-title',textColorClass]" @mousedown="startDrag(false)" >
             {{ title }}
@@ -24,7 +24,7 @@
                     </a>
                     <div class="dropdown-item">
                         <label class="label">Opacity</label>
-                        <input class="slider is-fullwidth" step="1" min="0" max="100" :value="bgColor.a * 100" type="range" @input="onOpacityChange">
+                        <input class="slider is-fullwidth" step="1" min="0" max="100" :value="bgColor.a! * 100" type="range" @input="onOpacityChange">
                     </div>
                     <!-- TODO: add opacity slider -->
                     <hr class="dropdown-divider" />
@@ -62,6 +62,7 @@ const store = useGlobalState()
 const props = defineProps<{
     elem: UIElement,
     state?: ElementState,
+    official?: boolean
 
     contentClass?: string
 }>()
@@ -117,6 +118,7 @@ const style = computed(() => {
         position: "absolute",
         left: `${pos.x}px`,
         top: `${pos.y}px`,
+        'z-index': props.elem.zIndex ?? 0
         // width: Math.min(size.width, document.documentElement.clientWidth - pos.x) + "px",
         // width: Math.min(size.height, document.documentElement.clientHeight - pos.y) + "px", 
         // width: size.width + "px",
@@ -252,5 +254,8 @@ function onResizeStop() {
     position: absolute;
     bottom: 0;
     right: 0;
+}
+.official {
+    border: 4px dashed black;
 }
 </style>

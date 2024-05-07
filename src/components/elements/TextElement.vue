@@ -1,5 +1,5 @@
 <template>
-<BaseElement :elem="elem" :state="state" @state="updateState">
+<BaseElement :elem="elem" :state="state" :official="official" @state="updateState">
     <span class="content" v-html="content" />
 </BaseElement>
 </template>
@@ -7,10 +7,10 @@
 <script setup lang="ts">
 import BaseElement from './BaseElement.vue';
 import { ElementState, StateKeys, TextElement } from '../../types.ts';
-
-import { parseMarkdown, replaceVariables } from '../../util.ts'
+import { parseMarkdown, replaceVariables, useTemplate } from '../../util.ts'
 import { onMounted, ref, watch } from 'vue';
 import { useGlobalState } from '../../store/state.ts';
+import Handlebars from 'handlebars'
 
 const store = useGlobalState()
 
@@ -22,15 +22,27 @@ let content = ref<string>()
 const props = defineProps<{
     elem: TextElement,
     state?: ElementState,
+    official?: boolean
 }>()
-async function computeContent() {
-    const text = replaceVariables(props.elem.text, store.variables)
-    content.value = await parseMarkdown(text)
+let template: HandlebarsTemplateDelegate|null = null
+function compileTemplate() {
+    try {
+        template = Handlebars.compile(props.elem.template, { })
+        computeContent()
+    } catch(err) {
+        template = null
+        content.value = "!!TEMPLATE FAILED!!"
+        console.error("template error:", (err as any).message)
+    }
+} 
+function computeContent() {
+    if(!template) return
+    content.value = useTemplate(template, store.variables)
 }
 
 watch(() => store.variables, computeContent)
-watch(() => props.elem.text, computeContent)
-onMounted(() => computeContent())
+watch(() => props.elem.template, compileTemplate)
+onMounted(() => compileTemplate())
 
 function updateState(key: StateKeys, value: any) {
     emit("state", key, value)
