@@ -117,7 +117,7 @@ impl ManagerInstance {
             steamid2: steamid.steam2(),
             auth_token: token,
             user
-        }).unwrap();
+        })
         self.client_steamid_map.insert(steamid, client.id());
         Ok(())
     }
