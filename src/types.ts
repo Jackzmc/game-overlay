@@ -3,13 +3,9 @@ export interface Size { width: number, height: number}
 export interface Color { r: number, g: number, b: number, a?: number }
 export enum ElemFlags {
     None = 0,
-    // Only show for survviors
-    SurvivorsOnly = 1,
-    // Show only on death
-    ShowOnlyOnDeath = 2,
-    // Show when not dead
-    ShowOnlyOnAlive = 4
+
 }
+// TODO: implement
 export enum ElemAlignment {
     TopLeft,
     TopRight,
@@ -24,7 +20,7 @@ export enum ElemVisibility {
     DisplayOnly
 }
 
-export type ElemType = "text" | "list:text" | "list:dynamic" 
+export type ElemType = "text" | "list:text" | "list:dynamic"
 export interface BaseElement {
     // id: string,
     active: boolean
@@ -33,6 +29,7 @@ export interface BaseElement {
     zIndex?: number,
     defaults?: ElementState,
     flags?: ElemFlags,
+    variables: Record<string, any>
 }
 
 export interface TextElement extends BaseElement {
@@ -86,7 +83,7 @@ export interface ElementState {
 
 export type StateKeys = keyof ElementState | "_reset"
 
-export type ManagerResponseType = "manager_connected" | "manager_disconnected" | "joined_server" | "left_server" | "game_data" | "authorized" | "update_ui" | "register_temp_ui"
+export type ManagerResponseType = "manager_connected" | "manager_disconnected" | "joined_server" | "left_server" | "game_data" | "authorized" | "update_ui" | "register_temp_ui" 
 interface ManagerResponseBase {
     type: ManagerResponseType
 }
@@ -115,7 +112,7 @@ export interface ManagerResponseUpdateUI {
     type: "update_ui",
     namespace: string | null,
     elem_id: string,
-    visibility: boolean,
+    visible: boolean,
     variables: Record<string, any>
 }
 export interface ManagerResponseRegisterTempUI {

@@ -20,7 +20,8 @@ export function sanitize(content: string) {
 export function useTemplate(template: HandlebarsTemplateDelegate, variables: Record<string, any>) {
   return DOMPurify.sanitize(template(variables), {
       SANITIZE_NAMED_PROPS: true,
-      ALLOWED_TAGS: ['b', 'pre', 'i', 'em', 'strong', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'p', 'div', 'img', 'a'], ALLOWED_ATTR: ['style','class', 'href']
+      ALLOWED_TAGS: ['b', 'pre', 'i', 'em', 'strong', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'p', 'div', 'img', 'a'], 
+      ALLOWED_ATTR: ['style','class', 'href', 'src']
   })
 }
 
@@ -32,7 +33,7 @@ export function parseMarkdown(content: string) {
     const clean = DOMPurify.sanitize(content)
     return marked.parse(clean)
 }
-export function replaceVariables(content: string, variables: Record<string, string|number|boolean|undefined>) {
+export function replaceVariables(content: string, variables: Record<string, any>) {
     return Object.entries(variables)
       .reduce((acc, [key, value]) => {
         let replacement: string

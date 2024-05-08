@@ -239,7 +239,7 @@ impl ManagerInstance {
                 }
                 debug!("forwarded tmp ui to {} clients", c);
             },
-            ServerOutgoingEvent::UpdateUi { namespace, elem_id, variables, visibility } => {
+            ServerOutgoingEvent::UpdateUi { namespace, elem_id, variables, visible: visibility } => {
                 if elem_id.is_none() && namespace.is_none() {
                     return Err(RequestError::InvalidData);
                 }
@@ -250,7 +250,7 @@ impl ManagerInstance {
                         namespace: namespace.clone(),
                         elem_id: elem_id.clone(),
                         variables: variables.clone(),
-                        visibility: *visibility
+                        visible: *visibility
                     }).unwrap();
                 }
             },

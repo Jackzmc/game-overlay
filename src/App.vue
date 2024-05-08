@@ -30,13 +30,14 @@ import { invoke } from '@tauri-apps/api'
 import { listen } from '@tauri-apps/api/event'
 import { markRaw, onMounted, onUnmounted, ref, } from 'vue'
 import { register, unregisterAll } from '@tauri-apps/api/globalShortcut';
-import { ElemType, ElemVisibility, ElementState, ManagerResponse, StateKeys, UIElement } from './types.ts';
+import { ElemAlignment, ElemType, ElemVisibility, ElementState, ManagerResponse, StateKeys, UIElement } from './types.ts';
 
-import TextListElement from './components/elements/TextListElement.vue';
-import TextElement from './components/elements/TextElement.vue';
 import { ActionFlags } from './types';
 import { useGlobalState } from './store/state.ts';
 import { computed } from '@vue/reactivity';
+
+import TextListElement from './components/elements/TextListElement.vue';
+import TextElement from './components/elements/TextElement.vue';
 
 const TAURI_AVAILABLE = window.__TAURI_METADATA__ != undefined
 const store = useGlobalState()
@@ -70,6 +71,7 @@ const ELEM_TYPE_MAP: Record<ElemType, any> = markRaw({
 function setElement(namespace: string | null, id: string, element: UIElement): ElementData {
   const fullId = `${namespace??''}:${id}`
   console.debug(fullId, JSON.stringify(element))
+  if(element.alignment == undefined) element.alignment = ElemAlignment.TopLeft
   elementRegistry.value[fullId] = {
     id: fullId,
     component: markRaw(ELEM_TYPE_MAP[element.type]),
@@ -98,19 +100,26 @@ function test() {
       title: "Server Not Trusted",
       bgColor: { r: 255, g: 172, b: 66 }
     },
+    variables: {},
     zIndex: 10,
     active: true,
     template: "<div class='has-text-black has-text-centered'><h1>Trust Server</h1><p>You are connected to <b> {{ server.name }}</b> ({{ server.ip }}) for the first time. No elements will be loaded until you trust this server.</p><br><p>Do you trust this server?</p><br><div class='buttons is-centered'><div class='button is-info'>Trust Server</div><div class='button'>Dismiss</div></div></div>",
   })
-  setElement(null, "test", {
+  setElement(null, "player_note", {
     type: "text",
     defaults: {
       position:{ x: 20, y: 15 },
-      visibility: ElemVisibility.DisplayOnly,
-      title: "Variable test",
+      title: "Player Notes",
+
+    },
+    alignment: ElemAlignment.TopRight,
+    variables: {
+      steamid: "STEAM_",
+      name: "Disgruntled Pea",
+      "notes":[{"id":2425,"content":"his ass crack is the lube dispenser","client":{"id":"STEAM_1:1:10882645","name":"Disgruntled Pea","avatarUrl":"https://admin.jackz.me/api/users/STEAM_1:1:10882645/avatar","isAdmin":false},"markedBy":{"id":"STEAM_1:0:530680608","name":"Ashley Golix❤","avatarUrl":"https://admin.jackz.me/api/users/STEAM_1:0:530680608/avatar"},"banned":false,"action":null},{"id":2424,"content":"stores lube in his ass crack lol","client":{"id":"STEAM_1:1:10882645","name":"Disgruntled Pea","avatarUrl":"https://admin.jackz.me/api/users/STEAM_1:1:10882645/avatar","isAdmin":false},"markedBy":{"id":"STEAM_1:1:421048382","name":"Mello Yello","avatarUrl":"https://admin.jackz.me/api/users/STEAM_1:1:421048382/avatar"},"banned":false,"action":null},{"id":2415,"content":"identifies as a rat","client":{"id":"STEAM_1:1:10882645","name":"Disgruntled Pea","avatarUrl":"https://admin.jackz.me/api/users/STEAM_1:1:10882645/avatar","isAdmin":false},"markedBy":{"id":"STEAM_1:0:530680608","name":"Ashley Golix❤","avatarUrl":"https://admin.jackz.me/api/users/STEAM_1:0:530680608/avatar"},"banned":false,"action":null},{"id":2405,"content":"bube","client":{"id":"STEAM_1:1:10882645","name":"Disgruntled Pea","avatarUrl":"https://admin.jackz.me/api/users/STEAM_1:1:10882645/avatar","isAdmin":false},"markedBy":{"id":"STEAM_1:0:204230496","name":"Liquor","avatarUrl":"https://admin.jackz.me/api/users/STEAM_1:0:204230496/avatar"},"banned":false,"action":null},{"id":2067,"content":"a cheap whore","client":{"id":"STEAM_1:1:10882645","name":"Disgruntled Pea","avatarUrl":"https://admin.jackz.me/api/users/STEAM_1:1:10882645/avatar","isAdmin":false},"markedBy":{"id":"STEAM_1:0:530680608","name":"Ashley Golix❤","avatarUrl":"https://admin.jackz.me/api/users/STEAM_1:0:530680608/avatar"},"banned":false,"action":null},{"id":449,"content":" got herpes from a jockey","client":{"id":"STEAM_1:1:10882645","name":"Disgruntled Pea","avatarUrl":"https://admin.jackz.me/api/users/STEAM_1:1:10882645/avatar","isAdmin":false},"markedBy":{"id":"STEAM_1:0:530680608","name":"Ashley Golix❤","avatarUrl":"https://admin.jackz.me/api/users/STEAM_1:0:530680608/avatar"},"banned":false,"action":null},{"id":438,"content":"has a pet rat that lives inside his anus.","client":{"id":"STEAM_1:1:10882645","name":"Disgruntled Pea","avatarUrl":"https://admin.jackz.me/api/users/STEAM_1:1:10882645/avatar","isAdmin":false},"markedBy":{"id":"STEAM_1:0:530680608","name":"Ashley Golix❤","avatarUrl":"https://admin.jackz.me/api/users/STEAM_1:0:530680608/avatar"},"banned":false,"action":null},{"id":244,"content":"if he leaves it means he sharted himself","client":{"id":"STEAM_1:1:10882645","name":"Disgruntled Pea","avatarUrl":"https://admin.jackz.me/api/users/STEAM_1:1:10882645/avatar","isAdmin":false},"markedBy":{"id":"STEAM_1:0:530680608","name":"Ashley Golix❤","avatarUrl":"https://admin.jackz.me/api/users/STEAM_1:0:530680608/avatar"},"banned":false,"action":null}]
     },
     active: true,
-    template: "* Time: %time%\n* Date: %date%\n* Hello %name%, your steamid is %steamid%\n* You are on: %server_name% (%server_ip%)",
+    template: "<h4>Notes for {{name}}</h4>{{#each notes}}<div class='list-item'><b>{{this.markedBy.name}}</b><p>{{this.content}}</p></div>{{/each}}",
   })
   setElement(null, "test2", {
     type: "text",
@@ -119,6 +128,7 @@ function test() {
       position: { x: 5, y: 250 },
       title: "test",
     },
+    variables: {},
     active: true,
     template: "<a href='https://google.com'>Malicious Link</a>&nbsp;&nbsp;<a href='javascript:alert(1)'>Alert</a> <div class='box'>test</div> <img src='https://cdn.jackz.me/img/steve.png' />"
   })
@@ -127,6 +137,7 @@ function test() {
     defaults: {
       title: "Big List",
     },
+    variables: {},
     active: true,
     list: Array(15).fill(undefined).map((_, i) => {
       return {
@@ -141,6 +152,7 @@ function test() {
       position: { x: 400, y: 10 },
       title: "My List",
     },
+    variables: {},
     active: true,
     list: [
       {
@@ -205,7 +217,14 @@ function loadData() {
     trustedServerIds.value = JSON.parse(data)
 }
 
+function onWindowResize() {
+  store.height = document.documentElement.clientHeight
+  store.width = document.documentElement.clientWidth
+}
+
 onMounted(async() => {
+  addEventListener("resize", onWindowResize)
+
   loadData()
   test()
   // render()
@@ -292,7 +311,8 @@ async function onManagerData(payload: ManagerResponse) {
       let elem: ElementData | undefined = elementRegistry.value[id]
       if(!elem && payload.namespace) elem = await fetchElement(payload.namespace, payload.elem_id)
       if(!elem) return console.warn("No elem", payload)
-      elem.element.active = payload.visibility
+      elem.element.active = payload.visible
+      elem.element.variables = payload.variables
       break;
     }
     case "manager_connected": {
@@ -311,6 +331,7 @@ onUnmounted(async() => {
   if(TAURI_AVAILABLE) {
     await unregisterAll()
   }
+  removeEventListener("resize", onWindowResize)
 })
 </script>
 

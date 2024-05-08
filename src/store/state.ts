@@ -12,7 +12,9 @@ export interface GlobalState {
     id: string,
     ip: string,
     name: string
-  }
+  },
+  width: number,
+  height: number
 }
 
 export interface SteamUser {
@@ -42,6 +44,8 @@ export const useGlobalState = defineStore('state', {
         time: "",
         date: "",
         managerConnected: false,
+        width: 1280,
+        height: 720,
 
         steamid: undefined,
         steamUser: undefined,
@@ -71,6 +75,6 @@ export const useGlobalState = defineStore('state', {
       authorize(steamid: string, user: any) {
         this.steamid = steamid
         this.steamUser = user
-      }
+      },
     },
 })
