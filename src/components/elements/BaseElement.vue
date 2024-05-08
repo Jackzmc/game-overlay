@@ -48,8 +48,8 @@
 
 <script setup lang="ts">
 import { StyleValue, computed, ref } from 'vue';
-import { ElemVisibility, ElementState, StateKeys, UIElement } from '../../types.ts';
-import { colorToCSS, shouldUseDarkText } from '../../util.ts';
+import { ElemAlignment, ElemVisibility, ElementState, StateKeys, UIElement } from '../../types.ts';
+import { colorToCSS, replaceVariables, shouldUseDarkText } from '../../util.ts';
 import { useGlobalState } from '../../store/state.ts';
 import ColorPicker from '../ColorPicker.vue'
 const emit = defineEmits<{
@@ -79,7 +79,7 @@ const bgColor = computed(() => {
     return color
 })
 const title = computed(() => {
-    return getState("title", "Untitled Element")
+    return replaceVariables(getState("title", "Untitled Element"), store.variables)
 })
 const textColorClass = computed(() => {
     return shouldUseDarkText(bgColor.value) ? "has-text-black" : "has-text-white"
@@ -110,14 +110,33 @@ const size = computed(() => {
     return getState("size", { width: 300, height: 400 })
 })
 
+const position = computed(() => {
+    const pos = getState("position", { x: 40, y: 40 })
+    let [x,y] = [ pos.x, pos.y ]
+    // if(props.elem.alignment) {
+    //     switch(props.elem.alignment) {
+    //         case ElemAlignment.TopRight: {
+    //             console.log(pos.x, store.width, store.width - pos.x)
+    //             x = store.width - pos.x
+    //             // y = store.height - pos.y
+    //         }
+    //     }
+    // }
+    // if(x >= store.width) {
+    //     x = store.width - size.value.width
+    // }
+    return { x, y }
+})
+
 const style = computed(() => {
-    const pos = getState("position", { x: 40, y: 40})
+    const xElemName = props.elem.alignment === ElemAlignment.TopLeft || props.elem.alignment === ElemAlignment.BottomLeft ? "left" : "right"
+    const yElemName = props.elem.alignment === ElemAlignment.TopLeft || props.elem.alignment === ElemAlignment.TopRight ? "top" : "bottom"
     return {
         'background-color': colorToCSS(bgColor.value),
         display: dragging.value ? "hidden" : "block",
         position: "absolute",
-        left: `${pos.x}px`,
-        top: `${pos.y}px`,
+        [xElemName]: `${position.value.x}px`,
+        [yElemName]: `${position.value.y}px`,
         'z-index': props.elem.zIndex ?? 0
         // width: Math.min(size.width, document.documentElement.clientWidth - pos.x) + "px",
         // width: Math.min(size.height, document.documentElement.clientHeight - pos.y) + "px", 
@@ -153,9 +172,11 @@ function onMouseMove(e: any) {
     const size = (header.value as HTMLElement).getBoundingClientRect()
     let x = e.clientX - (size.width/2)
     let y = e.clientY - (size.height/2)
+    if(props.elem.alignment === ElemAlignment.TopRight || props.elem.alignment === ElemAlignment.BottomRight) x = document.body.clientWidth - x - size.width
     if(x < 0) x = 0
     else if(x >= document.body.clientWidth - size.width) x = document.body.clientWidth - size.width
 
+    if(props.elem.alignment === ElemAlignment.BottomLeft || props.elem.alignment === ElemAlignment.BottomRight) y = document.body.clientHeight - y - size.height
     if(y < 0) y = 0
     else if(y >= document.documentElement.clientHeight - size.height) y = document.documentElement.clientHeight - size.height
 
@@ -214,7 +235,10 @@ function onResizeStop() {
     min-height: 3rem;
 }
 .can-scroll {
-    overflow-y: auto;
+    overflow-y: auto !important;
+    scrollbar-width: thin;
+    scrollbar-color: grey transparent
+
 }
 .card-body {
     overflow-y: hidden;

@@ -7,8 +7,8 @@
 <script setup lang="ts">
 import BaseElement from './BaseElement.vue';
 import { ElementState, StateKeys, TextElement } from '../../types.ts';
-import { parseMarkdown, replaceVariables, useTemplate } from '../../util.ts'
-import { onMounted, ref, watch } from 'vue';
+import { useTemplate } from '../../util.ts'
+import { computed, onMounted, ref, watch } from 'vue';
 import { useGlobalState } from '../../store/state.ts';
 import Handlebars from 'handlebars'
 
@@ -24,6 +24,12 @@ const props = defineProps<{
     state?: ElementState,
     official?: boolean
 }>()
+const variables = computed(() => {
+    return {
+        ...store.variables,
+        ...props.elem.variables
+    }
+})
 let template: HandlebarsTemplateDelegate|null = null
 function compileTemplate() {
     try {
@@ -37,10 +43,10 @@ function compileTemplate() {
 } 
 function computeContent() {
     if(!template) return
-    content.value = useTemplate(template, store.variables)
+    content.value = useTemplate(template, variables.value)
 }
 
-watch(() => store.variables, computeContent)
+watch(() => variables, computeContent)
 watch(() => props.elem.template, compileTemplate)
 onMounted(() => compileTemplate())
 
@@ -52,5 +58,11 @@ function updateState(key: StateKeys, value: any) {
 <style scoped>
 .card-content {
     padding: 0;
+}
+.list-item {
+    padding: 5px;
+    border-bottom: 0.1px solid lightgray;
+    margin-left: 0;
+    margin-right: 0;
 }
 </style>
