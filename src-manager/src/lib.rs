@@ -11,7 +11,7 @@ pub enum ClientIncomingRequest {
     JoinedServer { server_id: String, server_name: String, server_ip: String },
     LeftServer,
     GameData {}, // TODO: implement
-    Authorized { steamids: Vec<String>, auth_token: String, user: SteamUser },
+    Authorized { steamid2: String, auth_token: String, user: SteamUser },
     // Manual activation for UI side:
     ManagerDisconnected,
     ManagerConnected,
@@ -37,7 +37,7 @@ pub enum ClientOutgoingEvent {
 pub enum ServerIncomingRequest {
     Authorized,
     ManagerDisconnected,
-    Action { steamid: String, action: String, namespace: String, elem_id: String }
+    Action { steamid2: String, action: String, namespace: String, elem_id: String }
 }
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(tag = "type")]
@@ -47,8 +47,8 @@ pub enum ServerOutgoingEvent {
     PlayerJoined { steamid: String },
     PlayerLeft { steamid: String },
     GameState {}, // TODO: implement
-    RegisterTempUi { elem_id: String, expires_seconds: Option<u64>, element: UIElement },
-    UpdateUi { namespace: Option<String>, elem_id: Option<String>, variables: Value, visible: bool },
+    RegisterTempUi { steamids: Vec<String>, elem_id: String, expires_seconds: Option<u64>, element: UIElement },
+    UpdateUi { steamids: Vec<String>, namespace: Option<String>, elem_id: Option<String>, variables: Value, visible: bool },
     ChangeAudioState { steamids: Vec<String>, source: String, state: u8, volume: Option<f32>, start_time: Option<f32>, repeat: Option<bool> }
 
 }
