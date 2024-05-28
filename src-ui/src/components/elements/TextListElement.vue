@@ -9,7 +9,7 @@
 <script setup lang="ts">
 import BaseElement from './BaseElement.vue';
 import { ElementState, TextListElement, StateKeys } from '../../types.ts';
-import { useGlobalState } from '../../store/state.ts';
+import { useGlobalState } from '@/store/state.ts';
 import ListItem from '../subelements/ListItem.vue'
 
 const store = useGlobalState()

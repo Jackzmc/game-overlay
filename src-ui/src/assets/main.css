@@ -17,6 +17,10 @@
     --opacity: var(0.5);
 }
 
+body {
+  /* background-image: url("/test_bg2.jpg") */
+}
+
 .rbox {
   background-color: rgba(255, 255, 255, --opacity);
   color: black;

@@ -9,7 +9,7 @@ import BaseElement from './BaseElement.vue';
 import { ElementState, StateKeys, TextElement } from '../../types.ts';
 import { useTemplate } from '../../util.ts'
 import { computed, onMounted, ref, watch } from 'vue';
-import { useGlobalState } from '../../store/state.ts';
+import { useGlobalState } from '@/store/state.ts';
 import Handlebars from 'handlebars'
 
 const store = useGlobalState()
