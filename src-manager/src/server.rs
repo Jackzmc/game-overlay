@@ -46,6 +46,9 @@ impl ServerInstance {
     pub fn clients(&self) -> Values<'_, SteamID, Client> {
         self.clients.values().into_iter()
     }
+    pub fn client_ids(&self) -> Vec<SteamID> {
+        self.clients.keys().map(|s| s.clone()).collect()
+    }
     pub fn addr(&self) -> String { self.addr.ip().to_string() }
 
     pub fn send_request(&self, request: &ServerIncomingRequest) -> Result<(), RequestError> {
@@ -64,6 +67,9 @@ impl ServerInstance {
         } else {
             Err(ClientNotAuthorized)
         }
+    }
+    pub fn has_client_steamid(&mut self, id: &SteamID) -> bool {
+        self.clients.contains_key(id)
     }
     pub async fn remove_client(&mut self, id: &SteamID) -> bool {
         debug!("{}: remove_client {}", self.id, id.steam2());

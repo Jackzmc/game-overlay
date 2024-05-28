@@ -117,7 +117,7 @@ impl ManagerInstance {
             steamid2: steamid.steam2(),
             auth_token: token,
             user
-        })
+        });
         self.client_steamid_map.insert(steamid, client.id());
         Ok(())
     }
@@ -128,6 +128,13 @@ impl ManagerInstance {
 
     pub fn get_client(&self, id: &str) -> Option<Client> {
         self.clients.get(id).cloned()
+    }
+    pub fn get_client_from_steamid(&self, steamid: &SteamID) -> Option<Client> {
+        if let Some(client_id) = self.client_steamid_map.get(steamid) {
+            self.clients.get(client_id).cloned()
+        } else {
+            None
+        }
     }
     pub fn has_client(&self, id: &str) -> bool {
         self.clients.contains_key(id)
@@ -224,35 +231,55 @@ impl ManagerInstance {
                 let mut server = server.lock().await;
                 server.remove_client(&steamid);
             },
-            ServerOutgoingEvent::RegisterTempUi { elem_id, expires_seconds, element } => {
+            ServerOutgoingEvent::RegisterTempUi { steamids, elem_id, expires_seconds, element } => {
                 let server = server.lock().await;
-                let mut c = 0;
-                for client in server.clients() {
-                    let mut client = client.lock().await;
-                    debug!("forwarding register temp ui to client {}", client.id());
-                    client.send_request(&ClientIncomingRequest::RegisterTempUi {
-                        elem_id: elem_id.clone(),
-                        expires_seconds: expires_seconds.clone(),
-                        element: element.clone()
-                    }).unwrap();
-                    c += 1;
+                let server_clients = server.client_ids();
+                drop(server);
+                for steamid2 in steamids {
+                    if let Ok(steamid) = SteamID::from_steam2(steamid2) {
+                        if server_clients.contains(&steamid) {
+                            if let Some(client) = self.get_client_from_steamid(&steamid) {
+                                let mut client = client.lock().await;
+                                debug!("forwarding register temp ui to client {}", client.id());
+                                client.send_request(&ClientIncomingRequest::RegisterTempUi {
+                                    elem_id: elem_id.clone(),
+                                    expires_seconds: expires_seconds.clone(),
+                                    element: element.clone()
+                                }).unwrap();
+                            }
+                        }
+                    }
                 }
-                debug!("forwarded tmp ui to {} clients", c);
+                debug!("forwarded tmp ui to {} clients", steamids.len());
             },
-            ServerOutgoingEvent::UpdateUi { namespace, elem_id, variables, visible: visibility } => {
+            ServerOutgoingEvent::UpdateUi { steamids, namespace, elem_id, variables, visible } => {
                 if elem_id.is_none() && namespace.is_none() {
                     return Err(RequestError::InvalidData);
                 }
                 let server = server.lock().await;
-                for client in server.clients() {
-                    let mut client = client.lock().await;
-                    client.send_request(&ClientIncomingRequest::UpdateUi {
-                        namespace: namespace.clone(),
-                        elem_id: elem_id.clone(),
-                        variables: variables.clone(),
-                        visible: *visibility
-                    }).unwrap();
+                let server_clients = server.client_ids();
+                drop(server);
+                for steamid2 in steamids {
+                    if let Ok(steamid) = SteamID::from_steam2(steamid2) {
+                        if server_clients.contains(&steamid) {
+                            if let Some(client) = self.get_client_from_steamid(&steamid) {
+                                let mut client = client.lock().await;
+                                debug!("forwarding update ui to client {}", client.id());
+                                client.send_request(&ClientIncomingRequest::UpdateUi {
+                                    namespace: namespace.clone(),
+                                    elem_id: elem_id.clone(),
+                                    variables: variables.clone(),
+                                    visible: *visible
+                                }).unwrap();
+                            }
+                        }
+                    }
                 }
+            },
+            ServerOutgoingEvent::ChangeAudioState {
+                steamids, source, state, volume, start_time, repeat
+            } => {
+                panic!("not implemented")
             },
             // ServerOutgoingEvent::GameState {} => {}
             e => panic!("server event {:?} not supported", e)
