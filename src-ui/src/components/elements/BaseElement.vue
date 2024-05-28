@@ -1,5 +1,5 @@
 <template>
-<div :class="['card','root',{'official': official, 'invisible': store.interactable&&visibility==ElemVisibility.InteractableOnly}]" ref="root" :style="style as StyleValue"@mouseleave="dropdownActive = false" v-if="isVisible">
+<div :class="['card','root',stateClass,{'official': official, 'invisible': store.interactable&&visibility==ElemVisibility.InteractableOnly}]" ref="root" :style="style as StyleValue"@mouseleave="dropdownActive = false" v-if="isVisible">
     <header ref="header" class="card-header" :style="{cursor: store.editable?'move':'inherit'}" v-if="store.interactable">
         <p :class="['card-header-title',textColorClass]" @mousedown="startDrag(false)" >
             {{ title }}
@@ -8,7 +8,7 @@
         <button class="" aria-haspopup="true" @click="toggleVisibility">
             <Icon :icon="visibility == ElemVisibility.Always ? 'fa-eye' : 'fa-eye-slash'" />
         </button>
-        <div :class="['card-header-icon','dropdown','is-right',{'is-active': dropdownActive || colorPickerActive}]">
+        <div :class="['card-header-icon','dropdown','is-right',stateClass,{'is-active': dropdownActive || colorPickerActive}]">
             <div class="dropdown-trigger"   @click.prevent="dropdownActive = !dropdownActive">
                 <button class="" aria-haspopup="true" aria-controls="dropdown-menu">
                     <Icon icon="fa-ellipsis" />
@@ -34,7 +34,7 @@
             </div>
         </div>
     </header>
-    <div ref="body" :class="['card-body',contentClass??'card-content',textColorClass,{'can-scroll': store.interactable}]" :style="contentStyle" v-if="isVisibleContent">
+    <div ref="body" :class="['card-body',stateClass,contentClass??'card-content',textColorClass,{'can-scroll': store.interactable}]" :style="contentStyle" v-if="isVisibleContent">
         <slot></slot>
         <br>
     </div>
@@ -48,9 +48,9 @@
 
 <script setup lang="ts">
 import { StyleValue, computed, ref } from 'vue';
-import { ElemAlignment, ElemVisibility, ElementState, StateKeys, UIElement } from '../../types.ts';
-import { colorToCSS, replaceVariables, shouldUseDarkText } from '../../util.ts';
-import { useGlobalState } from '../../store/state.ts';
+import { ElemAlignment, ElemVisibility, ElementState, StateKeys, UIElement } from '@/types.ts';
+import { colorToCSS, replaceVariables, shouldUseDarkText } from '@/util.ts';
+import { useGlobalState } from '@/store/state.ts';
 import ColorPicker from '../ColorPicker.vue'
 const emit = defineEmits<{
   (e: 'state', key: StateKeys, value: any): void
@@ -74,6 +74,7 @@ let dropdownActive = ref(false)
 let colorPickerActive = ref(false)
 
 const bgColor = computed(() => {
+    if(!store.interactable) return { r: 0, g: 0, b: 0, a: 0 }
     const color = props.state?.bgColor ?? props.elem.defaults?.bgColor ?? { r : 255, g: 255, b: 255 }
     color.a = getState("opacity", 0.6)
     return color
@@ -98,6 +99,11 @@ const isVisibleContent = computed(() => {
     if(visibility.value == ElemVisibility.DisplayOnly) return !store.interactable || store.editable
     if(visibility.value == ElemVisibility.InteractableOnly) return !store.interactable
     return true
+})
+const stateClass = computed(() => {
+    if(store.editable) return "state-edit"
+    if(store.interactable) return "state-interact"
+    return "state-overlay"
 })
 
 function getState(key: keyof ElementState, defaultValue: any) {
@@ -281,5 +287,14 @@ function onResizeStop() {
 }
 .official {
     border: 4px dashed black;
+}
+.root.state-overlay {
+    padding: 0;
+    margin: 0;
+    border: 0;
+    background-color: rgba(0, 0, 0, 0)
+}
+.card-body.state-overlay {
+    opacity: 1.0;
 }
 </style>

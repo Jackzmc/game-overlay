@@ -13,7 +13,7 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 import { TextListElementEntry } from '../../types.ts';
-import { useGlobalState } from '../../store/state.ts';
+import { useGlobalState } from '@/store/state.ts';
 import { useTemplate } from '../../util.ts';
 import ActionButton from '../ActionButton.vue';
 import Handlebars from 'handlebars'
