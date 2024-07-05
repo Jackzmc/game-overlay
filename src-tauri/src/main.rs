@@ -13,7 +13,7 @@ use std::io::ErrorKind;
 use std::ops::Deref;
 use std::path::PathBuf;
 use sysinfo::{Pid, ProcessStatus, System};
-use tauri::{AppHandle, Manager, PhysicalPosition, Position, Size, State, Url, Window};
+use tauri::{AppHandle, LogicalPosition, Manager, PhysicalPosition, Position, Size, State, Url, Window};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 use active_win_pos_rs::get_active_window;
@@ -124,7 +124,7 @@ fn main() {
             main_window.set_always_on_top(true).unwrap();
             main_window.set_decorations(false).unwrap();
             main_window.set_ignore_cursor_events(true).unwrap();
-            main_window.open_devtools();
+            // main_window.open_devtools();
             main_window.hide().unwrap();
             let monitor = main_window.current_monitor().unwrap().unwrap();
             main_window.set_size(Size::from(monitor.size().to_owned())).unwrap();
@@ -160,6 +160,7 @@ struct ProcessDataResult {
     status: String
 }
 fn start_process_check_thread(window: tauri::Window) {
+    window.maximize().unwrap();
     std::thread::spawn(move || {
         debug!("process check thread started. target process: {}", TARGET_PROC_NAME.deref());
         loop {
