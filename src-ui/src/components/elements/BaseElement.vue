@@ -67,7 +67,7 @@ const store = useGlobalState()
 const props = defineProps<{
     instance: ElementInstance,
     id: string,
-    template: ElementTemplate,
+    instanceTemplate: ElementTemplate,
     official?: boolean
     contentClass?: string
 }>()
@@ -80,7 +80,8 @@ let colorPickerActive = ref(false)
 
 const bgColor = computed(() => {
     if(!store.interactable) return { r: 0, g: 0, b: 0, a: 0 }
-    const color = props.instance?.bgColor ?? props.template.defaults?.bgColor ?? { r : 255, g: 255, b: 255 }
+    // const color = props.instance?.state.bgColor ?? props.instanceTemplate.defaults?.bgColor ?? { r: 255, g: 255, b: 255 }
+    const color = getState( "bgColor", { r: 255, g: 255, b: 255 } )
     color.a = getState("opacity", 0.6)
     return color
 })
@@ -110,14 +111,18 @@ const stateClass = computed(() => {
     if(store.interactable) return "state-interact"
     return "state-overlay"
 })
-
 function getState( key: keyof ElementState, defaultValue: any ) {
-    //@ts-expect-error let us index by any string
-    let value = props.instance[key]
-    if ( !value ) {
-        //@ts-expect-error let us index by any string
-        return props.template.defaults ? props.template.defaults[key] : defaultValue
+    //@ts-expect-error Allow indexing by key, as key should be a property... 
+    // Don't know how to avoid TS error
+    let value = props.instance.state[key]
+    if ( value == undefined ) {
+        value = props.instanceTemplate.defaults
+            //@ts-expect-error same as above
+            ? props.instanceTemplate.defaults[key]
+            : undefined
     }
+    if(value == undefined) value = defaultValue
+    return value
 }
 
 const size = computed(() => {
@@ -125,7 +130,7 @@ const size = computed(() => {
 })
 
 const position = computed(() => {
-    const pos = getState("position", { x: 40, y: 40 })
+    const pos = getState( "position", { x: 40, y: 40 } )
     let [x,y] = [ pos.x, pos.y ]
     // if(props.elem.alignment) {
     //     switch(props.elem.alignment) {
@@ -143,8 +148,8 @@ const position = computed(() => {
 })
 
 const style = computed(() => {
-    const xElemName = props.template.alignment === ElemAlignment.TopLeft || props.template.alignment === ElemAlignment.BottomLeft ? "left" : "right"
-    const yElemName = props.template.alignment === ElemAlignment.TopLeft || props.template.alignment === ElemAlignment.TopRight ? "top" : "bottom"
+    const xElemName = props.instanceTemplate.alignment === ElemAlignment.TopLeft || props.instanceTemplate.alignment === ElemAlignment.BottomLeft ? "left" : "right"
+    const yElemName = props.instanceTemplate.alignment === ElemAlignment.TopLeft || props.instanceTemplate.alignment === ElemAlignment.TopRight ? "top" : "bottom"
     return {
         'background-color': colorToCSS(bgColor.value),
         display: dragging.value ? "hidden" : "block",
@@ -186,11 +191,11 @@ function onMouseMove(e: any) {
     const size = (header.value as HTMLElement).getBoundingClientRect()
     let x = e.clientX - (size.width/2)
     let y = e.clientY - (size.height/2)
-    if ( props.template.alignment === ElemAlignment.TopRight || props.template.alignment === ElemAlignment.BottomRight) x = document.body.clientWidth - x - size.width
+    if ( props.instanceTemplate.alignment === ElemAlignment.TopRight || props.instanceTemplate.alignment === ElemAlignment.BottomRight) x = document.body.clientWidth - x - size.width
     if(x < 0) x = 0
     else if(x >= document.body.clientWidth - size.width) x = document.body.clientWidth - size.width
 
-    if ( props.template.alignment === ElemAlignment.BottomLeft || props.template.alignment === ElemAlignment.BottomRight) y = document.body.clientHeight - y - size.height
+    if ( props.instanceTemplate.alignment === ElemAlignment.BottomLeft || props.instanceTemplate.alignment === ElemAlignment.BottomRight) y = document.body.clientHeight - y - size.height
     if(y < 0) y = 0
     else if(y >= document.documentElement.clientHeight - size.height) y = document.documentElement.clientHeight - size.height
 

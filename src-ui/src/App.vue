@@ -1,14 +1,14 @@
 <template>
 <div :class="{'interact-overlay': store.interactable}">
   <div ref="elementsContainer">
-    <component v-for="(instance) in instances" :key="instance.instanceId" 
-      :is="instance.template.component" 
-      :id="instance.instanceId"
-      :instance="instance.instance" 
-      :template="instance.template"
-      :official="instance.templateId.startsWith('overlay')"
+    <component v-for="(instRegistry, id) in instances" :key="instRegistry.instanceId" 
+      :is="instRegistry.templateRegistry.component" 
+      :id="instRegistry.instanceId"
+      :instance="instRegistry.instance" 
+      :instance-template="instRegistry.templateRegistry.template"
+      :official="instRegistry.templateId.startsWith('overlay')"
+      @state="( key: keyof ElementState, value: any ) => updateInstance( id, key, value )"
     />
-    <!-- @state="(key: keyof ElementState, value: any) => updateInstance(id, key, value)" -->
   </div>
   <div class="toggle-edit-box">
     <div class="buttons">
@@ -32,8 +32,6 @@ import { listen } from '@tauri-apps/api/event'
 import { markRaw, onMounted, onUnmounted, ref, } from 'vue'
 import { register, unregisterAll } from '@tauri-apps/api/globalShortcut';
 import { ElemAlignment, ElemType, ElemVisibility, ElementInstance, ElementState, ElementTemplate, ManagerResponse, StateKeys } from './types.ts';
-
-import { ActionFlags } from './types';
 import { useGlobalState } from './store/state.ts';
 import { computed } from '@vue/reactivity';
 
@@ -50,11 +48,11 @@ let proc = ref()
 export interface TemplateRegistryData {
   id: string,
   component: any,
-  element: ElementTemplate
+  template: ElementTemplate
 }
 export interface InstanceRegistryData {
   templateId: string,
-  template: TemplateRegistryData,
+  templateRegistry: TemplateRegistryData,
 
   instanceId: string,
   instance: ElementInstance
@@ -79,38 +77,42 @@ const ELEM_TYPE_MAP: Record<ElemType, any> = markRaw({
   "text": TextElement,
 })
 
-function registerTemplate( namespace: string, templateId: string, element: ElementTemplate ) {
+function registerTemplate( namespace: string, templateId: string, template: ElementTemplate ) {
   const fullId = `${namespace ?? ''}:${templateId}`
-  console.debug( 'registerTemplate', fullId, JSON.stringify( element ) )
-  if ( element.alignment == undefined ) element.alignment = ElemAlignment.TopLeft
+  console.debug( 'registerTemplate', fullId, JSON.stringify( template ) )
+  if ( template.alignment == undefined ) template.alignment = ElemAlignment.TopLeft
   templateRegistry.set( fullId, {
     id: fullId,
-    component: markRaw( ELEM_TYPE_MAP[element.type] ),
-    element: element
+    component: markRaw( ELEM_TYPE_MAP[template.type] ),
+    template: template
   })
   return templateRegistry.get(fullId)
 }
 
 function createElement( templateId: string, data: ElementInstance ): InstanceRegistryData | undefined {
-  const template = templateRegistry.get( templateId )
-  if ( !template ) return
+  if(!templateId) throw new Error("Invalid template ID: " + templateId)
+  const templateData = templateRegistry.get( templateId )
+  if ( !templateData ) throw new Error("Unknown template: " + templateId)
   const instanceId = uuidv4()
   const instance: InstanceRegistryData = {
     templateId,
-    template: template,
+    templateRegistry: markRaw(templateData),
 
     instanceId,
     instance: {
       variables: data.variables,
-      position: data.position,
-      bgColor: data.bgColor,
-      size: data.size,
-      visibility: data.visibility,
-      // Store separately so we can changes colors independently
-      opacity: data.opacity,
-      title: data.title,
+      state: {
+        position: data.state.position,
+        bgColor: data.state.bgColor,
+        size: data.state.size,
+        visibility: data.state.visibility,
+        // Store separately so we can changes colors independently
+        opacity: data.state.opacity,
+        title: data.state.title,
+      }
     }
   }
+  console.debug("createElement", instanceId, "of template", templateId)
   instances.value[instanceId] = instance
   return instance
 }
@@ -207,7 +209,7 @@ function test() {
     })
   } )
     */
-  registerTemplate( "overlay", "player_list", {
+  registerTemplate( "test", "player_list", {
     type: "text",
     defaults: {
       title: "Players"
@@ -231,7 +233,7 @@ function test() {
     //     },
     //   ]
     // },
-    template: `
+    hbTemplate: `
       {{#if interactable}}
         <div class="list">
         {{#each players}}
@@ -259,7 +261,7 @@ function test() {
         </div>
       {{/if}}`
   } )
-  createElement( "overlay:player_list", {
+  createElement( "test:player_list", {
     variables: {
       players: [
         {
@@ -279,8 +281,9 @@ function test() {
         },
       ]
     },
+    state: {}
   })
-  registerTemplate( "overlay", "player_info", {
+  registerTemplate( "test", "player_info", {
     type: "text",
     defaults: {
       title: "Players"
@@ -292,7 +295,7 @@ function test() {
     //     steamid: "STEAM_#####"
     //   },
     // },
-    template: `
+    hbTemplate: `
       {{#if interactable}}
         {{ player }}
       {{/if}}`
@@ -339,16 +342,17 @@ function test() {
 }
 
 // TODO: re-implement
-// function updateInstance(id: string, key: StateKeys, value: any) {
-//   if(key === "_reset") {
-//     if(value == "*") elementStates.value[id] = {}
-//     else delete elementStates.value[id][value as keyof ElementState]
-//   } else {
-//     if(!elementStates.value[id]) elementStates.value[id] = {}
-//     elementStates.value[id][key] = value
-//   }
-//   saveData()
-// }
+function updateInstance( id: string, key: StateKeys, value: any ) {
+  const { instance } = instances.value[id]
+  if(key === "_reset") {
+    if(value == "*") instance.state = {}
+    else delete instance.state[value as keyof ElementState]
+  } else {
+    if ( !instance.state ) instance.state = {}
+    instance.state[key] = value
+  }
+  saveData()
+}
 
 setInterval(() => {
   store.updateTime()
@@ -356,12 +360,12 @@ setInterval(() => {
 
 
 function saveData() {
-  localStorage.setItem("elem_data", JSON.stringify(instances.value))
+  localStorage.setItem("instance_data", JSON.stringify(instances.value))
   localStorage.setItem("trusted_servers", JSON.stringify(trustedServerIds.value))
 }
 
 function loadData() {
-  let data = localStorage.getItem("elem_data")
+  let data = localStorage.getItem("instance_data")
   if(data)
     instances.value = JSON.parse(data)
   data = localStorage.getItem("trusted_servers")
