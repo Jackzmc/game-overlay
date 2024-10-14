@@ -285,6 +285,6 @@ fn overlay_key(window: Window, data: State<Mutex<AppData>>) -> bool {
 }
 
 #[tauri::command]
-fn perform_action(action: String) -> Result<String, String> {
+fn perform_action(namespace: String, action: String) -> Result<String, String> {
     Err("not implemented".to_string())
 }

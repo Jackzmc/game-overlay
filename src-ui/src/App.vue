@@ -160,7 +160,7 @@ function test() {
     })
   } )
     */
-  setElement( null, "custom_html", {
+  setElement( null, "player_list", {
     active: true,
     type: "text",
     defaults: {
@@ -211,6 +211,24 @@ function test() {
         </div>
         {{/each}}
         </div>
+      {{/if}}`
+  } )
+  setElement( null, "player_info", {
+    active: true,
+    type: "text",
+    defaults: {
+      title: "Players"
+    },
+    variables: {
+      player: {
+        userid: 134,
+        name: "Player 3",
+        steamid: "STEAM_#####"
+      },
+    },
+    template: `
+      {{#if interactable}}
+        {{ player }}
       {{/if}}`
   } )
   setElement(null, "list", {
