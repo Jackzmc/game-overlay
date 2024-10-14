@@ -1,14 +1,14 @@
 <template>
-<BaseElement :elem="elem" :id="id" :state="state" :official="official" @state="updateState" content-class="">
+<BaseElement :instance="instance"  :id="id" :template="template" :official="official" @state="updateState" content-class="">
     <ul>
-        <ListItem v-for="(item, i) in elem.list" :key="i" :item="item" />
+        <ListItem v-for="(item, i) in template.list" :key="i" :item="item" />
     </ul>
 </BaseElement>
 </template>
 
 <script setup lang="ts">
 import BaseElement from './BaseElement.vue';
-import { ElementState, TextListElement, StateKeys } from '../../types.ts';
+import { ElementState, TextListElement, StateKeys, ElementInstance, ElementTemplate, TextListElementTemplate } from '../../types.ts';
 import { useGlobalState } from '@/store/state.ts';
 import ListItem from '../subelements/ListItem.vue'
 
@@ -19,9 +19,9 @@ const emit = defineEmits<{
 }>()
 
 const props = defineProps<{
-    elem: TextListElement,
+    instance: ElementInstance,
     id: string,
-    state?: ElementState,
+    template: TextListElementTemplate,
     official?: boolean
 }>()
 

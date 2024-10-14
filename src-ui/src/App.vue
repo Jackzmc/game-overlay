@@ -1,14 +1,14 @@
 <template>
 <div :class="{'interact-overlay': store.interactable}">
   <div ref="elementsContainer">
-    <component v-for="(elem, id) in elementRegistry" :key="id" 
-      :is="elem.component" 
-      :elem="elem.element" 
-      :id="id"
-      :state="elementStates[id]"
-      :official="id.startsWith('system')"
-      @state="(key: keyof ElementState, value: any) => updateState(id, key, value)"
+    <component v-for="(instance) in instances" :key="instance.instanceId" 
+      :is="instance.template.component" 
+      :id="instance.instanceId"
+      :instance="instance.instance" 
+      :template="instance.template"
+      :official="instance.templateId.startsWith('overlay')"
     />
+    <!-- @state="(key: keyof ElementState, value: any) => updateInstance(id, key, value)" -->
   </div>
   <div class="toggle-edit-box">
     <div class="buttons">
@@ -31,7 +31,7 @@ import { invoke } from '@tauri-apps/api'
 import { listen } from '@tauri-apps/api/event'
 import { markRaw, onMounted, onUnmounted, ref, } from 'vue'
 import { register, unregisterAll } from '@tauri-apps/api/globalShortcut';
-import { ElemAlignment, ElemType, ElemVisibility, ElementState, ManagerResponse, StateKeys, UIElement } from './types.ts';
+import { ElemAlignment, ElemType, ElemVisibility, ElementInstance, ElementState, ElementTemplate, ManagerResponse, StateKeys } from './types.ts';
 
 import { ActionFlags } from './types';
 import { useGlobalState } from './store/state.ts';
@@ -39,6 +39,7 @@ import { computed } from '@vue/reactivity';
 
 import TextListElement from './components/elements/TextListElement.vue';
 import TextElement from './components/elements/TextElement.vue';
+import { v4 as uuidv4 } from 'uuid'
 
 const TAURI_AVAILABLE = window.__TAURI_METADATA__ != undefined
 const store = useGlobalState()
@@ -46,15 +47,25 @@ const store = useGlobalState()
 
 let proc = ref()
 
-interface ElementData {
+export interface TemplateRegistryData {
   id: string,
   component: any,
-  element: UIElement
+  element: ElementTemplate
+}
+export interface InstanceRegistryData {
+  templateId: string,
+  template: TemplateRegistryData,
+
+  instanceId: string,
+  instance: ElementInstance
 }
 
-let elementStates = ref<Record<string, ElementState>>({})
-let elementRegistry = ref<Record<string, ElementData>>({})
-let elementsContainer = ref()
+let instances = ref<Record<string, InstanceRegistryData>>( {} )
+let templateRegistry = new Map<string, TemplateRegistryData>()
+
+// let elementStates = ref<Record<string, ElementState>>({})
+// let elementRegistry = ref<Record<string, ElementData>>( {} )
+let elementsContainer = ref() // html ref
 let trustedServerIds = ref<Record<string, boolean>>({})
 
 const isServerTrusted = computed(() => {
@@ -68,25 +79,61 @@ const ELEM_TYPE_MAP: Record<ElemType, any> = markRaw({
   "text": TextElement,
 })
 
-// type PartialBy<T, K extends keyof T> = Omit<T, K> & Partial<Pick<T, K>>
-function setElement(namespace: string | null, id: string, element: UIElement): ElementData {
-  const fullId = `${namespace??''}:${id}`
-  console.debug(fullId, JSON.stringify(element))
-  if(element.alignment == undefined) element.alignment = ElemAlignment.TopLeft
-  elementRegistry.value[fullId] = {
+function registerTemplate( namespace: string, templateId: string, element: ElementTemplate ) {
+  const fullId = `${namespace ?? ''}:${templateId}`
+  console.debug( 'registerTemplate', fullId, JSON.stringify( element ) )
+  if ( element.alignment == undefined ) element.alignment = ElemAlignment.TopLeft
+  templateRegistry.set( fullId, {
     id: fullId,
-    component: markRaw(ELEM_TYPE_MAP[element.type]),
+    component: markRaw( ELEM_TYPE_MAP[element.type] ),
     element: element
-  }
-  return elementRegistry.value[fullId] 
+  })
+  return templateRegistry.get(fullId)
 }
-async function fetchElement(namespace: string, id: string): Promise<ElementData | undefined> {
+
+function createElement( templateId: string, data: ElementInstance ): InstanceRegistryData | undefined {
+  const template = templateRegistry.get( templateId )
+  if ( !template ) return
+  const instanceId = uuidv4()
+  const instance: InstanceRegistryData = {
+    templateId,
+    template: template,
+
+    instanceId,
+    instance: {
+      variables: data.variables,
+      position: data.position,
+      bgColor: data.bgColor,
+      size: data.size,
+      visibility: data.visibility,
+      // Store separately so we can changes colors independently
+      opacity: data.opacity,
+      title: data.title,
+    }
+  }
+  instances.value[instanceId] = instance
+  return instance
+}
+
+// type PartialBy<T, K extends keyof T> = Omit<T, K> & Partial<Pick<T, K>>
+// function setElement(namespace: string | null, id: string, element: UIElement): ElementData {
+//   const fullId = `${namespace??''}:${id}`
+//   console.debug(fullId, JSON.stringify(element))
+//   if(element.alignment == undefined) element.alignment = ElemAlignment.TopLeft
+//   elementRegistry.value[fullId] = {
+//     id: fullId,
+//     component: markRaw(ELEM_TYPE_MAP[element.type]),
+//     element: element
+//   }
+//   return elementRegistry.value[fullId] 
+// }
+async function fetchElementTemplate(namespace: string, id: string): Promise<TemplateRegistryData | undefined> {
   try {
-    const elem: UIElement = await invoke("fetch_element", { namespace, id })
-    return setElement(namespace, id, elem)
+    const elem: ElementTemplate = await invoke("fetch_template", { namespace, id })
+    return registerTemplate(namespace, id, elem)
   } catch(err) {
     // TODO: throw better err
-    alert("fetchElement:" + (err as any).message)
+    alert("fetchElementTemplate:" + (err as any).message)
     return undefined
   }
 }
@@ -160,31 +207,30 @@ function test() {
     })
   } )
     */
-  setElement( null, "player_list", {
-    active: true,
+  registerTemplate( "overlay", "player_list", {
     type: "text",
     defaults: {
       title: "Players"
     },
-    variables: {
-      players: [
-        {
-          userid: 134,
-          name: "Player 1",
-          steamid: "STEAM_#####"
-        },
-        {
-          userid: 16346,
-          name: "Player 2",
-          steamid: "STEAM_#####"
-        },
-        {
-          userid: 134,
-          name: "Player 3",
-          steamid: "STEAM_#####"
-        },
-      ]
-    },
+    // variables: {
+    //   players: [
+    //     {
+    //       userid: 134,
+    //       name: "Player 1",
+    //       steamid: "STEAM_#####"
+    //     },
+    //     {
+    //       userid: 16346,
+    //       name: "Player 2",
+    //       steamid: "STEAM_#####"
+    //     },
+    //     {
+    //       userid: 134,
+    //       name: "Player 3",
+    //       steamid: "STEAM_#####"
+    //     },
+    //   ]
+    // },
     template: `
       {{#if interactable}}
         <div class="list">
@@ -213,75 +259,96 @@ function test() {
         </div>
       {{/if}}`
   } )
-  setElement( null, "player_info", {
-    active: true,
+  createElement( "overlay:player_list", {
+    variables: {
+      players: [
+        {
+          userid: 134,
+          name: "Player 1",
+          steamid: "STEAM_#####"
+        },
+        {
+          userid: 16346,
+          name: "Player 2",
+          steamid: "STEAM_#####"
+        },
+        {
+          userid: 134,
+          name: "Player 3",
+          steamid: "STEAM_#####"
+        },
+      ]
+    },
+  })
+  registerTemplate( "overlay", "player_info", {
     type: "text",
     defaults: {
       title: "Players"
     },
-    variables: {
-      player: {
-        userid: 134,
-        name: "Player 3",
-        steamid: "STEAM_#####"
-      },
-    },
+    // variables: {
+    //   player: {
+    //     userid: 134,
+    //     name: "Player 3",
+    //     steamid: "STEAM_#####"
+    //   },
+    // },
     template: `
       {{#if interactable}}
         {{ player }}
       {{/if}}`
   } )
-  setElement(null, "list", {
-    "type": "list:text",
-    defaults: {
-      position: { x: 400, y: 10 },
-      title: "My List",
-    },
-    variables: {},
-    active: true,
-    list: [
-      {
-        "title": "Element 1",
-        content: "Blah blah blah"
-      },
-      {
-        "title": "Element 2",
-        content: "Blah blah blah"
-      },
-      {
-        "title": "Element 3",
-        content: "Blah blah blah. But longer. Blah blah.",
-        actions: [
-          {
-            "label": "Kick Player",
-            "action": "kick #5235"
-          },
-          {
-            "label": "Ban Player",
-            "action": "ban #5235",
-            "bgColor": { r: 255, g: 120, b: 50, a: 1 },
-            flags: ActionFlags.RequireConfirmation
-          },
-          {
-            "label": "Add Note",
-            "action": "note #STEAM_##"
-          }
-        ]
-      }
-    ]
-  })
+  // setElement(null, "list", {
+  //   "type": "list:text",
+  //   defaults: {
+  //     position: { x: 400, y: 10 },
+  //     title: "My List",
+  //   },
+  //   variables: {},
+  //   active: true,
+  //   list: [
+  //     {
+  //       "title": "Element 1",
+  //       content: "Blah blah blah"
+  //     },
+  //     {
+  //       "title": "Element 2",
+  //       content: "Blah blah blah"
+  //     },
+  //     {
+  //       "title": "Element 3",
+  //       content: "Blah blah blah. But longer. Blah blah.",
+  //       actions: [
+  //         {
+  //           "label": "Kick Player",
+  //           "action": "kick #5235"
+  //         },
+  //         {
+  //           "label": "Ban Player",
+  //           "action": "ban #5235",
+  //           "bgColor": { r: 255, g: 120, b: 50, a: 1 },
+  //           flags: ActionFlags.RequireConfirmation
+  //         },
+  //         {
+  //           "label": "Add Note",
+  //           "action": "note #STEAM_##"
+  //         }
+  //       ]
+  //     }
+  //   ]
+  // })
 }
 
-function updateState(id: string, key: StateKeys, value: any) {
-  if(key === "_reset") {
-    if(value == "*") elementStates.value[id] = {}
-    else delete elementStates.value[id][value as keyof ElementState]
-  } else {
-    if(!elementStates.value[id]) elementStates.value[id] = {}
-    elementStates.value[id][key] = value
-  }
-  saveData()
-}
+// TODO: re-implement
+// function updateInstance(id: string, key: StateKeys, value: any) {
+//   if(key === "_reset") {
+//     if(value == "*") elementStates.value[id] = {}
+//     else delete elementStates.value[id][value as keyof ElementState]
+//   } else {
+//     if(!elementStates.value[id]) elementStates.value[id] = {}
+//     elementStates.value[id][key] = value
+//   }
+//   saveData()
+// }
 
 setInterval(() => {
   store.updateTime()
@@ -289,14 +356,14 @@ setInterval(() => {
 
 
 function saveData() {
-  localStorage.setItem("elem_data", JSON.stringify(elementStates.value))
+  localStorage.setItem("elem_data", JSON.stringify(instances.value))
   localStorage.setItem("trusted_servers", JSON.stringify(trustedServerIds.value))
 }
 
 function loadData() {
   let data = localStorage.getItem("elem_data")
   if(data)
-    elementStates.value = JSON.parse(data)
+    instances.value = JSON.parse(data)
   data = localStorage.getItem("trusted_servers")
   if(data)
     trustedServerIds.value = JSON.parse(data)
@@ -352,10 +419,10 @@ async function registerShortcuts() {
 
 function clearServerUIs() {
   console.debug("Clearing server and temp UIs")
-  for(const [id, data] of Object.entries(elementRegistry.value)) {
+  for(const [id, data] of Object.entries(instances.value)) {
     const [namespace, elemId] = id.split(":")
     if(namespace != "global") {
-      delete elementRegistry.value[id]
+      delete instances.value[id]
     }
   }
 }
@@ -382,22 +449,23 @@ async function onManagerData(payload: ManagerResponse) {
       break;
     }
     case "register_temp_ui": {
-      setElement(null, payload.elem_id, payload.element)
-      if(payload.expires_seconds) {
-        setTimeout(() => {
-          delete elementRegistry.value[`:${payload.elem_id}`]
-        }, 1000 * payload.expires_seconds)
-      }
+      // TODO: re-implement
+      // setElement(null, payload.elem_id, payload.element)
+      // // if(payload.expires_seconds) {
+      // //   setTimeout(() => {
+      // //     delete elementRegistry.value[`:${payload.elem_id}`]
+      // //   }, 1000 * payload.expires_seconds)
+      // // }
       break;
     }
     case "update_ui": {
-      // TODO: automatically do this manager side? idk
-      const id = `${payload.namespace??''}:${payload.elem_id}`
-      let elem: ElementData | undefined = elementRegistry.value[id]
-      if(!elem && payload.namespace) elem = await fetchElement(payload.namespace, payload.elem_id)
-      if(!elem) return console.warn("No elem", payload)
-      elem.element.active = payload.visible
-      elem.element.variables = payload.variables
+      // TODO: re-implement
+      // const id = `${payload.namespace??''}:${payload.elem_id}`
+      // let elem: ElementData | undefined = elementRegistry.value[id]
+      // if(!elem && payload.namespace) elem = await fetchElementTemplate(payload.namespace, payload.elem_id)
+      // if(!elem) return console.warn("No elem", payload)
+      // elem.element.active = payload.visible
+      // elem.element.variables = payload.variables
       break;
     }
     case "manager_connected": {

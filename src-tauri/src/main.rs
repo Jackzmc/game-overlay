@@ -155,7 +155,7 @@ fn main() {
             Ok(())
         })
         .manage(data)
-        .invoke_handler(tauri::generate_handler![fetch_element, overlay_key, perform_action])
+        .invoke_handler(tauri::generate_handler![fetch_template, overlay_key, perform_action])
         .run(context)
         .expect("error while running tauri application");
 }
@@ -240,7 +240,7 @@ fn start_process_check_thread(window: tauri::Window) {
 }
 
 #[tauri::command]
-async fn fetch_element(data: State<'_, Mutex<AppData>>, namespace: String, id: String) -> Result<Option<overlay_manager::UIElement>, String> {
+async fn fetch_template(data: State<'_, Mutex<AppData>>, namespace: String, id: String) -> Result<Option<overlay_manager::UIElement>, String> {
     let url = {
         let mut data = data.lock().unwrap();
         let mut url = data.http_url.clone();

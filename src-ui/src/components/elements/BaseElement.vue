@@ -1,5 +1,9 @@
 <template>
-<div :class="['card','root',stateClass,{'official': official, 'invisible': store.interactable&&visibility==ElemVisibility.InteractableOnly}]" ref="root" :style="style as StyleValue"@mouseleave="dropdownActive = false" v-if="isVisible">
+<div :class="['card', 'root', stateClass, {
+    'official': official,
+    'invisible': store.interactable && visibility == ElemVisibility.InteractableOnly
+}]" ref="root" :style="style as StyleValue"@mouseleave="dropdownActive = false" v-if="isVisible"
+>
     <header ref="header" class="card-header" :style="{cursor: store.editable?'move':'inherit'}" v-if="store.interactable">
         <p :class="['card-header-title',textColorClass]" @mousedown="startDrag(false)" >
             {{ title }}
@@ -47,10 +51,12 @@
 
 <script setup lang="ts">
 import { StyleValue, computed, ref } from 'vue';
-import { ElemAlignment, ElemVisibility, ElementState, StateKeys, UIElement } from '@/types.ts';
+import { ElemAlignment, ElemVisibility, ElementState, StateKeys } from '@/types.ts';
 import { colorToCSS, replaceVariables, shouldUseDarkText } from '@/util.ts';
 import { useGlobalState } from '@/store/state.ts';
 import ColorPicker from '../ColorPicker.vue'
+import { ElementInstance, ElementTemplate } from '../../types.ts';
+import { InstanceRegistryData } from '../../App.vue';
 const emit = defineEmits<{
   (e: 'state', key: StateKeys, value: any): void
 }>()
@@ -59,11 +65,10 @@ const store = useGlobalState()
 
 
 const props = defineProps<{
-    elem: UIElement,
+    instance: ElementInstance,
     id: string,
-    state?: ElementState,
+    template: ElementTemplate,
     official?: boolean
-
     contentClass?: string
 }>()
 let root = ref<HTMLElement>()
@@ -75,7 +80,7 @@ let colorPickerActive = ref(false)
 
 const bgColor = computed(() => {
     if(!store.interactable) return { r: 0, g: 0, b: 0, a: 0 }
-    const color = props.state?.bgColor ?? props.elem.defaults?.bgColor ?? { r : 255, g: 255, b: 255 }
+    const color = props.instance?.bgColor ?? props.template.defaults?.bgColor ?? { r : 255, g: 255, b: 255 }
     color.a = getState("opacity", 0.6)
     return color
 })
@@ -106,10 +111,13 @@ const stateClass = computed(() => {
     return "state-overlay"
 })
 
-function getState(key: keyof ElementState, defaultValue: any) {
-    let value = props.state ? props.state[key] : undefined
-    if(value == undefined) value = props.elem.defaults ? props.elem.defaults[key] : undefined
-    return value ?? defaultValue
+function getState( key: keyof ElementState, defaultValue: any ) {
+    //@ts-expect-error let us index by any string
+    let value = props.instance[key]
+    if ( !value ) {
+        //@ts-expect-error let us index by any string
+        return props.template.defaults ? props.template.defaults[key] : defaultValue
+    }
 }
 
 const size = computed(() => {
@@ -135,15 +143,15 @@ const position = computed(() => {
 })
 
 const style = computed(() => {
-    const xElemName = props.elem.alignment === ElemAlignment.TopLeft || props.elem.alignment === ElemAlignment.BottomLeft ? "left" : "right"
-    const yElemName = props.elem.alignment === ElemAlignment.TopLeft || props.elem.alignment === ElemAlignment.TopRight ? "top" : "bottom"
+    const xElemName = props.template.alignment === ElemAlignment.TopLeft || props.template.alignment === ElemAlignment.BottomLeft ? "left" : "right"
+    const yElemName = props.template.alignment === ElemAlignment.TopLeft || props.template.alignment === ElemAlignment.TopRight ? "top" : "bottom"
     return {
         'background-color': colorToCSS(bgColor.value),
         display: dragging.value ? "hidden" : "block",
         position: "absolute",
         [xElemName]: `${position.value.x}px`,
         [yElemName]: `${position.value.y}px`,
-        'z-index': props.elem.zIndex ?? 0
+        // 'z-index': props.instance.zIndex ?? 0
         // width: Math.min(size.width, document.documentElement.clientWidth - pos.x) + "px",
         // width: Math.min(size.height, document.documentElement.clientHeight - pos.y) + "px", 
         // width: size.width + "px",
@@ -178,11 +186,11 @@ function onMouseMove(e: any) {
     const size = (header.value as HTMLElement).getBoundingClientRect()
     let x = e.clientX - (size.width/2)
     let y = e.clientY - (size.height/2)
-    if(props.elem.alignment === ElemAlignment.TopRight || props.elem.alignment === ElemAlignment.BottomRight) x = document.body.clientWidth - x - size.width
+    if ( props.template.alignment === ElemAlignment.TopRight || props.template.alignment === ElemAlignment.BottomRight) x = document.body.clientWidth - x - size.width
     if(x < 0) x = 0
     else if(x >= document.body.clientWidth - size.width) x = document.body.clientWidth - size.width
 
-    if(props.elem.alignment === ElemAlignment.BottomLeft || props.elem.alignment === ElemAlignment.BottomRight) y = document.body.clientHeight - y - size.height
+    if ( props.template.alignment === ElemAlignment.BottomLeft || props.template.alignment === ElemAlignment.BottomRight) y = document.body.clientHeight - y - size.height
     if(y < 0) y = 0
     else if(y >= document.documentElement.clientHeight - size.height) y = document.documentElement.clientHeight - size.height
 

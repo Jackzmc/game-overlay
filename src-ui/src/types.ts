@@ -21,27 +21,24 @@ export enum ElemVisibility {
 }
 
 export type ElemType = "text" | "list:text" | "list:dynamic"
-export interface BaseElement {
-    // id: string,
-    active: boolean
+export interface BaseElementTemplate {
     type: ElemType,
     alignment?: ElemAlignment,
     zIndex?: number,
     defaults?: ElementState,
     flags?: ElemFlags,
-    variables: Record<string, any>
 }
 
-export interface TextElement extends BaseElement {
+export interface TextElementTemplate extends BaseElementTemplate {
     type: "text",
     template: string
 }
 
-export interface TextListElement extends BaseElement {
+export interface TextListElementTemplate extends BaseElementTemplate {
     type: "list:text",
     list: TextListElementEntry[]
 }
-export interface DynamicListElement extends BaseElement {
+export interface DynamicListElementTemplate extends BaseElementTemplate {
     type: "list:dynamic",
     list: Record<string, DynamicListElementEntry>,
 }
@@ -58,7 +55,7 @@ export interface TextListElementEntry {
     actions?: Action[]
 }
 
-export type UIElement = TextElement | TextListElement | DynamicListElement
+export type ElementTemplate = TextElementTemplate | TextListElementTemplate | DynamicListElementTemplate
 
 export enum ActionFlags {
     None,
@@ -79,6 +76,16 @@ export interface ElementState {
     // Store separately so we can changes colors independently
     opacity?: number,
     title?: string
+}
+export interface ElementInstance {
+    position?: Position,
+    bgColor?: Color,
+    size?: Size,
+    visibility?: ElemVisibility,
+    // Store separately so we can changes colors independently
+    opacity?: number,
+    title?: string,
+    variables: Record<string, any>
 }
 
 export type StateKeys = keyof ElementState | "_reset"
@@ -119,6 +126,6 @@ export interface ManagerResponseRegisterTempUI {
     type: "register_temp_ui",
     elem_id: string,
     expires_seconds: number | null, 
-    element: UIElement
+    element: ElementTemplate
 }
 export type ManagerResponse = ManagerResponseJoined | ManagerResponseLeft | ManagerResponseAuthorized | ManagerResponseDisconnected | ManagerResponseUpdateUI | ManagerResponseRegisterTempUI | ManagerResponseConnected | ManagerResponseDisconnected
