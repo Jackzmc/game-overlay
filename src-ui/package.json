@@ -18,6 +18,7 @@
     "@fortawesome/vue-fontawesome": "^3.0.3",
     "@tauri-apps/api": "^1",
     "bulma": "^1.0.0",
+    "bulma-list": "^2.1.0",
     "bulma-slider": "^2.0.5",
     "dompurify": "^3.1.2",
     "handlebars": "^4.7.8",

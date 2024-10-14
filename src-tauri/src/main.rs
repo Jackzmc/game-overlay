@@ -13,10 +13,11 @@ use std::io::ErrorKind;
 use std::ops::Deref;
 use std::path::PathBuf;
 use sysinfo::{Pid, ProcessStatus, System};
-use tauri::{AppHandle, LogicalPosition, Manager, PhysicalPosition, Position, Size, State, Url, Window};
+use tauri::{AppHandle, LogicalPosition, Manager, PhysicalPosition, Position, Size, State, Url, UserAttentionType, Window};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 use active_win_pos_rs::get_active_window;
+use dotenvy::dotenv;
 use tungstenite::{connect, Message};
 use log::{error, trace};
 use once_cell::sync::Lazy;
@@ -26,7 +27,7 @@ use serde_json::json;
 use crate::manager::{OverlayManagerInstance, start_manager_read_thread};
 
 
-const PROCESS_CHECK_INTERVAL: u64 = 1000 * 1;
+const PROCESS_CHECK_INTERVAL: u64 = 500;
 
 static TARGET_PROC_NAME: Lazy<String> = Lazy::new(|| env::var("TARGET_PROCESS_NAME").expect("Missing TARGET_PROCESS_NAME"));
 
@@ -105,6 +106,7 @@ fn init_data() -> AppData {
 }
 
 fn main() {
+    dotenv();
     if env::var("RUST_LOG").is_err() {
         env::set_var("RUST_LOG", format!("warn,{}=info", env!("CARGO_PKG_NAME")));
     }
@@ -121,14 +123,21 @@ fn main() {
     tauri::Builder::default()
         .setup(|app| {
             let main_window = app.get_window("main").unwrap();
-            main_window.set_always_on_top(true).unwrap();
+            let available_monitors = main_window.available_monitors().unwrap();
+            let primary_monitor = main_window.primary_monitor().unwrap().unwrap();
+            debug!("primary: {:?}", primary_monitor.name());
+            for (i, monitor) in available_monitors.iter().enumerate() {
+                debug!("{i} {:?} {:?} {:?}", monitor.name(), monitor.position(), monitor.size())
+            }
+
             main_window.set_decorations(false).unwrap();
             main_window.set_ignore_cursor_events(true).unwrap();
             // main_window.open_devtools();
             main_window.hide().unwrap();
-            let monitor = main_window.current_monitor().unwrap().unwrap();
-            main_window.set_size(Size::from(monitor.size().to_owned())).unwrap();
-            main_window.set_position(Position::Physical(PhysicalPosition { x: 0, y: 0 })).unwrap();
+            // let monitor = main_window.current_monitor().unwrap().unwrap();
+            main_window.set_size(Size::from(primary_monitor.size().to_owned())).unwrap();
+            main_window.set_position(Position::Physical(PhysicalPosition { x: 1920, y: 0 })).unwrap();
+            main_window.set_always_on_top(true).unwrap();
             {
                 // TODO: process
                 /*
@@ -151,6 +160,10 @@ fn main() {
         .expect("error while running tauri application");
 }
 
+fn set_monitor(window: Window, index: u8) {
+
+}
+
 #[derive(serde::Serialize, Clone)]
 struct ProcessDataResult {
     pid: u32,
@@ -160,6 +173,8 @@ struct ProcessDataResult {
     status: String
 }
 fn start_process_check_thread(window: tauri::Window) {
+    let main_monitor = window.primary_monitor().unwrap().unwrap();
+    window.set_position(Position::Physical(main_monitor.position().clone())).unwrap();
     window.maximize().unwrap();
     std::thread::spawn(move || {
         debug!("process check thread started. target process: {}", TARGET_PROC_NAME.deref());
@@ -167,9 +182,8 @@ fn start_process_check_thread(window: tauri::Window) {
             let state = window.state::<Mutex<AppData>>();
             let active_window = match get_active_window() {
                 Ok(window) => window,
+                // None active?
                 Err(_) => {
-                    error!("get_active_window returned error");
-                    std::thread::sleep(Duration::from_secs(2));
                     continue;
                 }
             };
@@ -178,7 +192,7 @@ fn start_process_check_thread(window: tauri::Window) {
                 // Ignore our window
                 continue;
             }
-            trace!("our_pid={our_pid} active_window pid={}", active_window.process_id);
+            // trace!("our_pid={our_pid} active_window pid={} name={}", active_window.process_id, active_window.app_name);
 
             let mut data = state.lock().unwrap();
             data.sys.refresh_processes();
@@ -190,7 +204,7 @@ fn start_process_check_thread(window: tauri::Window) {
                 // println!("proc found. pid={} active_pid={}", pid, active_window.process_id);
                 /* active_window.process_id == our_pid ||  */
                 if active_window.process_id == pid as u64 || active_window.app_name == *TARGET_PROC_NAME {
-                    trace!("found proc. pid={pid}");
+                    // trace!("found proc. pid={pid}");
                     window.emit("process", ProcessDataResult {
                         pid,
                         cpu_usage: proc.cpu_usage(),
@@ -254,9 +268,10 @@ fn overlay_key(window: Window, data: State<Mutex<AppData>>) -> bool {
     if data.view_state == ViewState::Interactable {
         debug!("overlay_key: hiding");
         // TODO: check process to determine state
-        data.view_state = ViewState::Hidden;
-        window.hide().unwrap();
+        data.view_state = ViewState::Visible;
         window.set_ignore_cursor_events(true).unwrap();
+        window.set_always_on_top(true);
+        window.request_user_attention(None).unwrap();
         false
     } else {
         debug!("overlay_key: showing");
@@ -264,6 +279,7 @@ fn overlay_key(window: Window, data: State<Mutex<AppData>>) -> bool {
         window.show().unwrap();
         window.set_ignore_cursor_events(false).unwrap();
         window.set_focus().unwrap();
+        window.set_always_on_top(false);
         true
     }
 }

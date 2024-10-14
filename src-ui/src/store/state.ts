@@ -54,6 +54,8 @@ export const useGlobalState = defineStore('state', {
     getters: {
       variables: (state) => {
         return {
+          interactable: state.interactable,
+          editable: state.editable,
           time: state.time,
           date: state.date,
           steamid: state.steamid ?? "[Unauthorized]",

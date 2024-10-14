@@ -20,7 +20,7 @@ export function sanitize(content: string) {
 export function useTemplate(template: HandlebarsTemplateDelegate, variables: Record<string, any>) {
   return DOMPurify.sanitize(template(variables), {
       SANITIZE_NAMED_PROPS: true,
-      ALLOWED_TAGS: ['b', 'pre', 'i', 'em', 'strong', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'p', 'div', 'img', 'a'], 
+      ALLOWED_TAGS: ['b', 'pre', 'i', 'em', 'strong', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'p', 'div', 'img', 'a', 'span', 'button', 'buttons'], 
       ALLOWED_ATTR: ['style','class', 'href', 'src']
   })
 }

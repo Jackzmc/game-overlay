@@ -4,6 +4,7 @@
     <component v-for="(elem, id) in elementRegistry" :key="id" 
       :is="elem.component" 
       :elem="elem.element" 
+      :id="id"
       :state="elementStates[id]"
       :official="id.startsWith('system')"
       @state="(key: keyof ElementState, value: any) => updateState(id, key, value)"
@@ -125,13 +126,24 @@ function test() {
     type: "text",
     defaults: {
       bgColor: { r: 120, g: 255, b: 255 },
-      position: { x: 5, y: 250 },
+      position: { x: 200, y: 250 },
       title: "test",
     },
     variables: {},
     active: true,
     template: "<a href='https://google.com'>Malicious Link</a>&nbsp;&nbsp;<a href='javascript:alert(1)'>Alert</a> <div class='box'>test</div> <img src='https://cdn.jackz.me/img/steve.png' />"
-  })
+  } )
+  setElement( null, "server", {
+    type: "text",
+    defaults: {
+      bgColor: { r: 120, g: 255, b: 255 },
+      position: { x: 600, y: 550 },
+      title: "server",
+    },
+    variables: {},
+    active: true,
+    template: "%server_ip% %server_id% %steamid% %name%"
+  } )
   setElement(null, "big_list", {
     type: "list:text",
     defaults: {
@@ -145,6 +157,61 @@ function test() {
         content: "Blah blah blah"
       }
     })
+  } )
+  setElement( null, "custom_html", {
+    type: "text",
+    defaults: {
+      title: "Players"
+    },
+    variables: {
+      players: [
+        {
+          userid: 134,
+          name: "Jackzie",
+          steamid: "STEAM_#####"
+        },
+        {
+          userid: 16346,
+          name: "AShley",
+          steamid: "STEAM_#####"
+        },
+        {
+          userid: 134,
+          name: "Valerie",
+          steamid: "STEAM_#####"
+        },
+      ]
+    },
+    template: `
+      {{#if interactable}}
+        <div class="list">
+        {{#each players}}
+        <div class="list-item">
+          <div class="list-item-content">
+            <div class="list-item-title">
+              {{ this.name }}
+            </div>
+            <div class="list-item-description">
+              <span class="tag is-black">{{ this.steamid }}</span>
+            </div>
+          </div>
+          <div class="list-item-controls has-visible-pointer-controls">
+            <div class="buttons is-right">
+              <button class="button">
+                <span>Edit</span>
+              </button>
+
+              <button class="button is-primary">
+                <span class="icon is-small">
+                  <i class="fas fa-ellipsis"></i>
+                </span>
+              </button>
+            </div>
+          </div>
+        </div>
+        {{/each}}
+        </div>
+      {{/if}}`
   })
   setElement(null, "list", {
     "type": "list:text",
@@ -353,3 +420,5 @@ onUnmounted(async() => {
   right: 0;
 }
 </style>
+
+<style src="../node_modules/bulma-list/css/bulma-list.css"></style>
