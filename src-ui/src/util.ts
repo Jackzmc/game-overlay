@@ -14,16 +14,17 @@ DOMPurify.addHook( 'afterSanitizeAttributes', function ( node, data, config ) {
         node.setAttribute('target', '_blank')
         node.setAttribute('onclick', `return confirm("Are you sure you want to navigate to ${href}?")`)
     } else if ( !node.hasAttribute( 'onclick' ) && node.hasAttribute( "data-action" ) ) {
-      const action = node.getAttribute("data-action")!
-      node.setAttribute( "onclick", `window.InvokeAction("${action}")`)
+      const [namespace, command] = node.getAttribute("data-action")!.split(":")
+      node.setAttribute( "onclick", `window.InvokeAction("${namespace}", "${command}")`)
     }
   }
 } );
 
-async function InvokeAction( action: string ) {
-  console.debug("window.InvokeAction", action)
-  await invoke( "perform_action", { action } )
+async function InvokeAction( namespace: string, command: string ) {
+  console.debug( "window.InvokeAction", { namespace, command } )
+  await invoke( "perform_action", { namespace, command } )
 }
+//@ts-expect-error TODO: add to d.ts
 window.InvokeAction = InvokeAction
 
 export function sanitize(content: string) {
