@@ -1,5 +1,5 @@
 <template>
-<BaseElement :elem="elem" :state="state" :official="official" @state="updateState" content-class="">
+<BaseElement :elem="elem" :id="id" :state="state" :official="official" @state="updateState" content-class="">
     <ul>
         <ListItem v-for="(item, i) in elem.list" :key="i" :item="item" />
     </ul>

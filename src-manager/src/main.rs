@@ -19,13 +19,13 @@ use std::time::Duration;
 use axum::{Json, Router, ServiceExt};
 use axum::body::Body;
 use axum::extract::{ConnectInfo, Path, Query, State};
-use axum::routing::{get, post};
+use axum::routing::{get, post, trace};
 use axum_template::engine::Engine;
 use futures_util::{SinkExt, StreamExt, TryFutureExt, TryStreamExt};
 use handlebars::Handlebars;
 use tokio::sync::{mpsc, RwLock};
 use tokio_stream::wrappers::UnboundedReceiverStream;
-use log::{debug, error, info, warn};
+use log::{debug, error, info, trace, warn};
 use serde_json::{json, Value};
 use steamid_ng::SteamID;
 use uuid::Uuid;
@@ -42,6 +42,7 @@ use axum::http::response::Parts;
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{AppendHeaders, IntoResponse};
 use axum_template::{RenderHtml, TemplateEngine};
+use dotenvy::dotenv;
 use sqlx::MySqlPool;
 use tokio::time::timeout;
 use overlay_manager::{AuthFailure, ClientOutgoingEvent, InitConnectionReqPayload, InitConnectionResPayload, ServerOutgoingEvent, ServerIncomingRequest, ClientIncomingRequest, UIElement};
@@ -96,6 +97,7 @@ impl AppState {
 }
 #[tokio::main]
 async fn main() {
+    dotenv().unwrap();
     if std::env::var("RUST_LOG").is_err() {
         std::env::set_var("RUST_LOG", format!("warn,{}=info", env!("CARGO_PKG_NAME")));
     }
@@ -294,7 +296,7 @@ async fn init_connection(mut ws: WebSocket, addr: SocketAddr, manager: Manager) 
     // Wait for the first initial connection
     tokio::task::spawn(async move {
         if let Some(Ok(message)) = ws.next().await {
-            debug!("incoming msg");
+            trace!("incoming msg");
             match serde_json::from_str::<InitConnectionReqPayload>(&message.into_text().unwrap()) {
                 Ok(json) => {
                     login_connection(ws, manager, json, addr).await;
@@ -351,6 +353,7 @@ async fn login_connection(mut ws: WebSocket, manager: Manager, req: InitConnecti
                     init_server_connection(ws, (tx, rx), manager, server).await;
                 },
                 Err(e) => {
+                    trace!("Server auth failed: {}", e);
                     send(&mut ws, InitConnectionResPayload::AuthError(e)).await;
                 }
             }
@@ -371,7 +374,7 @@ async fn wait_for_client_auth(client: Client) {
 }
 
 async fn init_client_connection(mut ws: WebSocket, (mut tx, mut rx): (UnboundedSender<Message>, UnboundedReceiverStream<Message>), manager: Manager, client: Client) {
-    debug!("entering client read loop");
+    trace!("entering client read loop");
     // Timeout if client doesn't authorize within CLIENT_AUTH_TIMEOUT
     if let Err(_) = tokio::time::timeout(CLIENT_AUTH_TIMEOUT, wait_for_client_auth(client.clone())).await {
         send(&mut ws, InitConnectionResPayload::AuthError(AuthFailure::Timeout)).await;
@@ -412,7 +415,7 @@ async fn init_client_connection(mut ws: WebSocket, (mut tx, mut rx): (UnboundedS
     manager.lock().await.remove_client(&id);
 }
 async fn init_server_connection(mut ws: WebSocket, (mut tx, mut rx): (UnboundedSender<Message>, UnboundedReceiverStream<Message>), manager: Manager, server: Server) {
-    debug!("entering server read loop");
+    trace!("entering server read loop");
     let (mut ws_tx, mut ws_rx) = ws.split();
     {
         let server = server.clone();
@@ -428,6 +431,7 @@ async fn init_server_connection(mut ws: WebSocket, (mut tx, mut rx): (UnboundedS
                         }
                     },
                     Err(e) => {
+                        trace!("server: invalid payload {}", e);
                         tx.send(InitConnectionResPayload::InvalidPayload { message: Some(e.to_string()) }.into()).ok();
                     }
                 }

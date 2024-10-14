@@ -33,3 +33,9 @@ const content = computed(() => {
     return useTemplate(template.value, store.variables)
 })
 </script>
+
+<style scoped>
+.list-item {
+    border: none;
+}
+</style>

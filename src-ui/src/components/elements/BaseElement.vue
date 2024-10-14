@@ -5,10 +5,10 @@
             {{ title }}
             <span v-if="store.editable" class="tag ml-1" style="font-size:12px"> {{ size.width }}x{{ size.height }}</span>
         </p>
-        <button class="" aria-haspopup="true" @click="toggleVisibility">
+        <button class="py-0" aria-haspopup="true" @click="toggleVisibility">
             <Icon :icon="visibility == ElemVisibility.Always ? 'fa-eye' : 'fa-eye-slash'" />
         </button>
-        <div :class="['card-header-icon','dropdown','is-right',stateClass,{'is-active': dropdownActive || colorPickerActive}]">
+        <div :class="['card-header-icon','py-0','dropdown','is-right',stateClass,{'is-active': dropdownActive || colorPickerActive}]">
             <div class="dropdown-trigger"   @click.prevent="dropdownActive = !dropdownActive">
                 <button class="" aria-haspopup="true" aria-controls="dropdown-menu">
                     <Icon icon="fa-ellipsis" />
@@ -26,7 +26,6 @@
                         <label class="label">Opacity</label>
                         <input class="slider is-fullwidth" step="1" min="0" max="100" :value="bgColor.a! * 100" type="range" @input="onOpacityChange">
                     </div>
-                    <!-- TODO: add opacity slider -->
                     <hr class="dropdown-divider" />
                     <a href="#" class="dropdown-item" @click="emit('state', '_reset', '*')">Reset</a>
                     <ColorPicker v-if="colorPickerActive" @choose="color => emit('state', 'bgColor', color)" />
@@ -34,7 +33,7 @@
             </div>
         </div>
     </header>
-    <div ref="body" :class="['card-body',stateClass,contentClass??'card-content',textColorClass,{'can-scroll': store.interactable}]" :style="contentStyle" v-if="isVisibleContent">
+    <div ref="body" :class="['card-body',stateClass,contentClass??'card-content',textColorClass,{'can-scroll': store.interactable}]" :style="contentStyle" v-show="isVisibleContent">
         <slot></slot>
         <br>
     </div>
@@ -61,6 +60,7 @@ const store = useGlobalState()
 
 const props = defineProps<{
     elem: UIElement,
+    id: string,
     state?: ElementState,
     official?: boolean
 
@@ -251,12 +251,13 @@ function onResizeStop() {
     overflow-x: clip;
     min-width: fit-content;
     min-height: fit-content;
-    padding: 8px;
+    padding: 2px;
     border-radius: 0;
     /* max-height: 10vh; */
 }
 .card {
     border-radius: 0;
+    box-shadow: none !important;
 }
 .card-header {
     border-bottom: 2px solid rgb(151, 150, 150);
@@ -264,7 +265,9 @@ function onResizeStop() {
     user-select: none;
 }
 .card-header-title {
-    padding: 8px;
+    padding-left: 8px;
+    padding-top: 2px;
+    padding-bottom: 2px;
 }
 .dropdown {
     overflow-y: visible;

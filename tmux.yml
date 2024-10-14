@@ -1,0 +1,19 @@
+session_name: overlay
+windows:
+    - window_name: main
+      layout: tiled
+      panes:
+        - shell_command:
+            - cd src-tauri
+            - sleep 2
+            - cargo run
+        - shell_command:
+            - cd src-manager
+            - cargo run
+        - shell_command:
+            - ssh hs1b -t tmux attach-session
+    - window_name: ui
+      panes:
+        - shell_command:
+           - cd src-ui
+           - yarn serve

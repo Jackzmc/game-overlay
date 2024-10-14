@@ -174,6 +174,7 @@ pub fn start_manager_read_thread(window: Window, manager: OverlayManager) {
             match manager.read::<overlay_manager::ClientIncomingRequest>() {
                 Ok(response) => {
                     if let Some(response) = response {
+                        debug!("data: {:?}", response);
                         window.emit("manager", response).unwrap();
                     }
                 },
