@@ -2,17 +2,29 @@ import { Marked } from 'marked'
 import { createDirectives } from 'marked-directive'
 import DOMPurify from 'dompurify'
 import { Color } from './types.ts'
+import { invoke } from '@tauri-apps/api'
 
-DOMPurify.addHook('afterSanitizeAttributes', function (node) {
+
+
+DOMPurify.addHook( 'afterSanitizeAttributes', function ( node, data, config ) {
   // Set text node content to uppercase
-  if (node.nodeName && node.nodeName.toLowerCase() === 'a') {
+  if ( node.nodeName && node.nodeName.toLowerCase() === 'a' || node.nodeName.toLowerCase() === 'button' ) {
     const href = node.getAttribute('href')
     if(href && !node.hasAttribute('onclick')) {
         node.setAttribute('target', '_blank')
         node.setAttribute('onclick', `return confirm("Are you sure you want to navigate to ${href}?")`)
+    } else if ( !node.hasAttribute( 'onclick' ) && node.hasAttribute( "data-action" ) ) {
+      const action = node.getAttribute("data-action")!
+      node.setAttribute( "onclick", `window.InvokeAction("${action}")`)
     }
   }
-});
+} );
+
+async function InvokeAction( action: string ) {
+  console.debug("window.InvokeAction", action)
+  await invoke( "perform_action", { action } )
+}
+window.InvokeAction = InvokeAction
 
 export function sanitize(content: string) {
   return DOMPurify.sanitize(content)
@@ -21,7 +33,9 @@ export function useTemplate(template: HandlebarsTemplateDelegate, variables: Rec
   return DOMPurify.sanitize(template(variables), {
       SANITIZE_NAMED_PROPS: true,
       ALLOWED_TAGS: ['b', 'pre', 'i', 'em', 'strong', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'p', 'div', 'img', 'a', 'span', 'button', 'buttons'], 
-      ALLOWED_ATTR: ['style','class', 'href', 'src']
+      ALLOWED_ATTR: ['style','class', 'href', 'src', "data-action", "onclick"],
+      
+      
   })
 }
 
@@ -29,7 +43,6 @@ const marked = new Marked()
   .use(createDirectives())
 
 export function parseMarkdown(content: string) {
-    // TODO: HTML purify
     const clean = DOMPurify.sanitize(content)
     return marked.parse(clean)
 }

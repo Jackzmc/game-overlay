@@ -92,6 +92,7 @@ async function fetchElement(namespace: string, id: string): Promise<ElementData 
 }
 
 function test() {
+  /*
   setElement("system", "trust_server", {
     type: "text",
     defaults: {
@@ -158,7 +159,9 @@ function test() {
       }
     })
   } )
+    */
   setElement( null, "custom_html", {
+    active: true,
     type: "text",
     defaults: {
       title: "Players"
@@ -167,17 +170,17 @@ function test() {
       players: [
         {
           userid: 134,
-          name: "Jackzie",
+          name: "Player 1",
           steamid: "STEAM_#####"
         },
         {
           userid: 16346,
-          name: "AShley",
+          name: "Player 2",
           steamid: "STEAM_#####"
         },
         {
           userid: 134,
-          name: "Valerie",
+          name: "Player 3",
           steamid: "STEAM_#####"
         },
       ]
@@ -197,14 +200,11 @@ function test() {
           </div>
           <div class="list-item-controls has-visible-pointer-controls">
             <div class="buttons is-right">
-              <button class="button">
-                <span>Edit</span>
-              </button>
-
-              <button class="button is-primary">
+              <button class="button" data-action="players:{{ this.steamid }}">
                 <span class="icon is-small">
                   <i class="fas fa-ellipsis"></i>
                 </span>
+                <span>Open</span>
               </button>
             </div>
           </div>
@@ -212,7 +212,7 @@ function test() {
         {{/each}}
         </div>
       {{/if}}`
-  })
+  } )
   setElement(null, "list", {
     "type": "list:text",
     defaults: {

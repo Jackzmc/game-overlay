@@ -20,6 +20,7 @@ const emit = defineEmits<{
 
 const props = defineProps<{
     elem: TextListElement,
+    id: string,
     state?: ElementState,
     official?: boolean
 }>()
