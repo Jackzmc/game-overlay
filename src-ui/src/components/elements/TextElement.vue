@@ -1,12 +1,12 @@
 <template>
-<BaseElement :instance="instance" :id="id" :template="template" :official="official" @state="updateState">
+<BaseElement :instance="instance" :id="id" :instance-template="instanceTemplate" :official="official" @state="updateState">
     <span class="content" v-html="content" />
 </BaseElement>
 </template>
 
 <script setup lang="ts">
 import BaseElement from './BaseElement.vue';
-import { ElementInstance, ElementState, StateKeys, TextElement, TextElementTemplate } from '../../types.ts';
+import { ElementInstance, ElementState, StateKeys, TextElementTemplate } from '../../types.ts';
 import { useTemplate } from '../../util.ts'
 import { computed, onMounted, ref, watch } from 'vue';
 import { useGlobalState } from '../../store/state.ts';
@@ -22,7 +22,7 @@ let content = ref<string>()
 const props = defineProps<{
     instance: ElementInstance,
     id: string,
-    template: TextElementTemplate,
+    instanceTemplate: TextElementTemplate,
     official?: boolean
 }>()
 const variables = computed(() => {
@@ -32,10 +32,10 @@ const variables = computed(() => {
     }
 })
 let handlebarsTemplate: HandlebarsTemplateDelegate|null = null
-function compileTemplate() {
+function compileHandlebarsTemplate() {
     try {
         console.time( `compileTemplate:${props.instance}` )
-        handlebarsTemplate = Handlebars.compile(props.template.template)
+        handlebarsTemplate = Handlebars.compile(props.instanceTemplate.hbTemplate)
         computeContent()
         console.timeEnd( `compileTemplate:${props}` )
     } catch(err) {
@@ -50,9 +50,9 @@ function computeContent() {
 }
 
 // watch(() => variables, computeContent)
-watch(() => variables, compileTemplate)
-watch(() => props.template.template, compileTemplate)
-onMounted(() => compileTemplate())
+watch(() => variables, compileHandlebarsTemplate)
+watch(() => props.instanceTemplate.hbTemplate, compileHandlebarsTemplate)
+onMounted(() => compileHandlebarsTemplate())
 
 function updateState(key: StateKeys, value: any) {
     emit("state", key, value)

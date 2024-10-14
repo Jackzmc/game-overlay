@@ -31,7 +31,7 @@ export interface BaseElementTemplate {
 
 export interface TextElementTemplate extends BaseElementTemplate {
     type: "text",
-    template: string
+    hbTemplate: string
 }
 
 export interface TextListElementTemplate extends BaseElementTemplate {
@@ -78,14 +78,8 @@ export interface ElementState {
     title?: string
 }
 export interface ElementInstance {
-    position?: Position,
-    bgColor?: Color,
-    size?: Size,
-    visibility?: ElemVisibility,
-    // Store separately so we can changes colors independently
-    opacity?: number,
-    title?: string,
-    variables: Record<string, any>
+    variables: Record<string, any>,
+    state: ElementState
 }
 
 export type StateKeys = keyof ElementState | "_reset"
