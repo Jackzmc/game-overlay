@@ -26,7 +26,7 @@ use handlebars::Handlebars;
 use tokio::sync::{mpsc, RwLock};
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use log::{debug, error, info, trace, warn};
-use serde_json::{json, Value};
+use serde_json::{from_str, json, Value};
 use steamid_ng::SteamID;
 use uuid::Uuid;
 use serde::{Serialize,Deserialize};
@@ -45,8 +45,8 @@ use axum_template::{RenderHtml, TemplateEngine};
 use dotenvy::dotenv;
 use sqlx::MySqlPool;
 use tokio::time::timeout;
-use overlay_manager::{AuthFailure, ClientOutgoingEvent, InitConnectionReqPayload, InitConnectionResPayload, ServerOutgoingEvent, ServerIncomingRequest, ClientIncomingRequest, UIElement};
-use crate::server::Element;
+use overlay_manager::{AuthFailure, ClientOutgoingEvent, InitConnectionReqPayload, InitConnectionResPayload, ServerOutgoingEvent, ServerIncomingRequest, ClientIncomingRequest, UITemplate};
+use crate::server::TemplateEntry;
 
 type QueryMap = HashMap<String, String>;
 static CLIENT_AUTH_TIMEOUT: Duration = Duration::from_secs(60 * 3);
@@ -116,7 +116,8 @@ async fn main() {
         .route("/socket", get(route_socket))
         .route("/auth/login", get(route_steam_login))
         .route("/auth/callback", get(route_steam_callback))
-        .route("/elements/:namespace/:id", get(route_get_element))
+        .route("/templates/:namespace/:id", get(route_get_template))
+        .route("/templates/:namespace/:id/html", get(route_get_template_html))
         .route("/manage", get(route_manage_ui))
         .with_state(Arc::new(state));
 
@@ -219,13 +220,13 @@ async fn route_steam_callback(
     Ok(RenderHtml("login_success", state.engine.clone(), json!({})))
 }
 
-async fn route_get_element(
+async fn route_get_template(
     Path((namespace, id)): Path<(String, String)>,
     State(state): State<Arc<AppState>>,
 ) -> Result<impl IntoResponse, AppError> {
     let pool = POOL.get().unwrap();
     // TODO: cache?
-    let row = sqlx::query_as!(Element, "SELECT e.id, e.data FROM overlay_elements e WHERE namespace = ? AND id = ?", namespace, id)
+    let row = sqlx::query_as!(TemplateEntry, "SELECT e.namespace, e.id, e.data FROM overlay_templates e WHERE namespace = ? AND id = ?", namespace, id)
         .fetch_optional(pool)
         .await
         .map_err(|e| AppError::DatabaseError { message: e.to_string() })?;
@@ -234,7 +235,33 @@ async fn route_get_element(
         Ok(([(axum::http::header::CONTENT_TYPE, "application/json")], row.data))
         // Ok(Json(row.data))
     } else {
-        Err(AppError::EntityNotFound { message: format!("No element with the id {id} was found in the {namespace} namespace").to_string() })
+        Err(AppError::EntityNotFound { message: format!("No template with the id {id} was found in the {namespace} namespace").to_string() })
+    }
+}
+async fn route_get_template_html(
+    Path((namespace, id)): Path<(String, String)>,
+    State(state): State<Arc<AppState>>,
+) -> Result<impl IntoResponse, AppError> {
+    let pool = POOL.get().unwrap();
+    // TODO: cache?
+    let row = sqlx::query_as!(TemplateEntry, "SELECT e.namespace, e.id, e.data FROM overlay_templates e WHERE namespace = ? AND id = ?", namespace, id)
+        .fetch_optional(pool)
+        .await
+        .map_err(|e| AppError::DatabaseError { message: e.to_string() })?;
+    if let Some(row) = row {
+        match from_str::<Value>(&row.data) {
+            Ok(json) => {
+                let template_str = json["hbTemplate"].as_str().unwrap().to_string();
+                Ok(([(axum::http::header::CONTENT_TYPE, "text/plain")], template_str))
+            },
+            Err(e) => {
+                Err(AppError::DatabaseError { message: format!("Invalid json data in template: {}", e).to_string() })
+            }
+        }
+        // We could use Json() but its already stringified, so we avoid unnecessarily converting to JSON and back:
+        // Ok(Json(row.data))
+    } else {
+        Err(AppError::EntityNotFound { message: format!("No template with the id {id} was found in the {namespace} namespace").to_string() })
     }
 }
 

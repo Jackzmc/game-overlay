@@ -12,6 +12,7 @@ use tungstenite::{connect, Message, WebSocket};
 use once_cell::unsync::Lazy;
 use crate::{OverlayManager};
 use overlay_manager;
+use overlay_manager::ClientOutgoingEvent;
 
 pub struct ClientAuthorized {
     pub steamid2: String,
@@ -120,6 +121,16 @@ impl OverlayManagerInstance {
         } else {
             None
         })
+    }
+    
+    pub fn send_action(&mut self, instance_id: String, namespace: String, command: String, input: Option<String>) -> Result<(), String> {
+        let str = serde_json::to_string(&ClientOutgoingEvent::Action {
+            command,
+            namespace,
+            input: input.unwrap_or("".to_string()),
+            instance_id
+        }).unwrap();
+        self.send(Message::Text(str))
     }
 }
 

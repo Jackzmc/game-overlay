@@ -242,9 +242,9 @@ fn start_process_check_thread(window: tauri::Window) {
 #[tauri::command]
 async fn fetch_template(data: State<'_, Mutex<AppData>>, namespace: String, id: String) -> Result<Option<overlay_manager::UIElement>, String> {
     let url = {
-        let mut data = data.lock().unwrap();
+        let data = data.lock().unwrap();
         let mut url = data.http_url.clone();
-        url.set_path(&format!("/elements/{namespace}/{id}"));
+        url.set_path(&format!("/templates/{namespace}/{id}"));
         url
     };
     let response = reqwest::get(url)
@@ -270,7 +270,7 @@ fn overlay_key(window: Window, data: State<Mutex<AppData>>) -> bool {
         // TODO: check process to determine state
         data.view_state = ViewState::Visible;
         window.set_ignore_cursor_events(true).unwrap();
-        window.set_always_on_top(true);
+        window.set_always_on_top(true).unwrap();
         window.request_user_attention(None).unwrap();
         false
     } else {
@@ -279,12 +279,18 @@ fn overlay_key(window: Window, data: State<Mutex<AppData>>) -> bool {
         window.show().unwrap();
         window.set_ignore_cursor_events(false).unwrap();
         window.set_focus().unwrap();
-        window.set_always_on_top(false);
+        window.set_always_on_top(false).unwrap();
         true
     }
 }
 
 #[tauri::command]
-fn perform_action(namespace: String, action: String) -> Result<String, String> {
+fn perform_action(data: State<'_, Mutex<AppData>>, instance_id: String, namespace: String, command: String, input: Option<String>) -> Result<String, String> {
+    // built in actions?
+    //overlay:create_element <input of spaces>
+    let lock = data.lock().unwrap();
+    let manager = lock.manager.lock().unwrap();
+    manager.send_action(instance_id, namespace, command, input);
+
     Err("not implemented".to_string())
 }
