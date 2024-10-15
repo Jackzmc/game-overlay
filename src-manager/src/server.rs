@@ -3,13 +3,14 @@ use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::time::SystemTime;
 use axum::extract::ws::Message;
+use handlebars::Template;
 use log::debug;
 use serde::{Deserialize, Serialize};
 use sqlx::{Executor, FromRow, MySqlPool, query};
 use steamid_ng::SteamID;
 use tokio::sync::mpsc::UnboundedSender;
 use uuid::Uuid;
-use overlay_manager::{ClientIncomingRequest, ServerIncomingRequest, UIElement};
+use overlay_manager::{ClientIncomingRequest, ServerIncomingRequest, UITemplate};
 use crate::manager::{Client, RequestError};
 use crate::POOL;
 
@@ -19,7 +20,7 @@ pub struct ServerInstance {
     id: String,
     clients: HashMap<SteamID, Client>,
     addr: SocketAddr,
-    ui_element_ids: Vec<String>,
+    template_ids: Vec<String>,
     elements_fetch_time: Option<SystemTime>
     // db: MySqlPool
 }
@@ -36,7 +37,7 @@ impl ServerInstance {
             namespace,
             id,
             clients: HashMap::new(),
-            ui_element_ids: Vec::new(),
+            template_ids: Vec::new(),
             elements_fetch_time: None
         }
     }
@@ -99,9 +100,9 @@ impl ServerInstance {
 //         }
 //     }
 
-    fn _insert_element(&mut self, elem: Element) -> Result<UIElement, String> {
-        let json: UIElement =  serde_json::from_str(&elem.data).map_err(|e| e.to_string())?;
-        self.ui_element_ids.push(elem.id.clone());
+    fn _insert_template(&mut self, template: TemplateEntry) -> Result<UITemplate, String> {
+        let json: UITemplate =  serde_json::from_str(&template.data).map_err(|e| e.to_string())?;
+        self.template_ids.push(template.id.clone());
         Ok(json)
     }
 
@@ -116,19 +117,24 @@ impl ServerInstance {
     pub async fn fetch_element_ids(&mut self) -> Result<Vec<String>, String> {
         if let Some(last_fetch) = self.elements_fetch_time {
             if SystemTime::now().duration_since(last_fetch).unwrap().as_secs() < ELEMENT_CACHE_TIME {
-                return Ok(self.ui_element_ids.clone());
+                return Ok(self.template_ids.clone());
             }
         }
         let pool = POOL.get().unwrap();
-        let rows: Vec<Element> = sqlx::query_as("SELECT e.id, e.data FROM overlay_elements_servers es
-    LEFT JOIN overlay_elements e ON e.id = es.element_id
-WHERE es.namespace = ? AND es.server_id = ?")
-            .bind(&self.namespace)
-            .bind(&self.id)
+        let rows: Vec<TemplateEntry> = sqlx::query!("SELECT e.namespace, e.id, e.data FROM overlay_elements_servers es
+    LEFT JOIN overlay_templates e ON e.id = es.element_id
+WHERE es.namespace = ? AND es.server_id = ?", self.namespace, self.id)
             .fetch_all(pool).await
-            .map_err(|e| e.to_string())?;
+            .map_err(|e| e.to_string())?
+            .into_iter()
+            .map(|e| TemplateEntry {
+                namespace: e.namespace.unwrap(),
+                id: e.id.unwrap(),
+                data: e.data.unwrap(),
+            })
+            .collect();
         for row in &rows {
-            self.ui_element_ids.push(row.id.clone());
+            self.template_ids.push(row.id.clone());
         }
         Ok(rows.iter().map(|r| r.id.to_string()).collect())
 
@@ -136,7 +142,8 @@ WHERE es.namespace = ? AND es.server_id = ?")
 }
 
 #[derive(FromRow)]
-pub struct Element {
+pub struct TemplateEntry {
+    pub namespace: String,
     pub id: String,
     pub data: String
 }

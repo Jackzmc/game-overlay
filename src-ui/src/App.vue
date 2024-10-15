@@ -248,7 +248,7 @@ function test() {
           </div>
           <div class="list-item-controls has-visible-pointer-controls">
             <div class="buttons is-right">
-              <button class="button" data-action="players:{{ this.steamid }}">
+              <button class="button" data-action-id="overlay:create_element" data-action-data="test:player_info {{ this.steamid }}">
                 <span class="icon is-small">
                   <i class="fas fa-ellipsis"></i>
                 </span>
