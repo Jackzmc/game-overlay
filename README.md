@@ -2,6 +2,9 @@
 
 Adds an overlay that modded game servers can interact with, allowing for custom text and actions for players. Examples are button actions for moderators (kick, ban, mute), or informational (extra player's names and health).
 
+> [!WARNING]  
+> This is an unfinished and somewhat abandoned project, mostly due to the UI just not feeling correct and the overlay aspect not feeling polished. The system works but not much can be done and the implementation is lacking in a lot of areas and full testing.
+
 ## Implementation
 
 There are 3 parts:
