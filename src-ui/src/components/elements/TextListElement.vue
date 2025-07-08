@@ -1,5 +1,5 @@
 <template>
-<BaseElement :instance="instance"  :id="id" :instance-template="instanceTemplate":official="official" @state="updateState" content-class="">
+<BaseElement :instance="instance"  :id="id" :template-id="templateId" :instance-template="instanceTemplate":official="official" @state="updateState" content-class="">
     <ul>
         <ListItem v-for="(item, i) in instanceTemplate.list" :key="i" :item="item" />
     </ul>
@@ -22,6 +22,7 @@ const props = defineProps<{
     instance: ElementInstance,
     id: string,
     instanceTemplate: TextListElementTemplate,
+    templateId: string
     official?: boolean
 }>()
 

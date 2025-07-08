@@ -17,20 +17,52 @@ pub enum ClientIncomingRequest {
     ManagerConnected,
     RegisterTempElement { elem_id: String, expires_seconds: Option<u64>, element: UITemplate },
     // Clients will fetch UI if received (with visibility=true)
-    CreateElement { namespace: String, instance_id: String, template_id: String /* TODO: other data */ },
-    UpdateElement { namespace: String, instance_id: String, visible: bool, variables: Value },
+    CreateElement {
+        #[serde(flatten)]
+        registry: CreateElementRegister
+    },
+    UpdateElement {
+        #[serde(flatten)]
+        registry: UpdateElementRegister
+    },
     ChangeAudioState { source: String, state: u8, volume: Option<f32>, start_time: Option<f32>, repeat: Option<bool> }
 }
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct CreateElementRegister {
+    pub namespace: String,
+    pub instance_id: String,
+    pub template_id: String,
+    pub options: Option<ElementOptions>
+}
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct ElementOptions {
+    /// If set, after N seconds after element started on client, it will delete itself
+    /// Default: None
+    pub expires_seconds: Option<u64>,
+    /// Should element be visible to client on start?
+    /// Default: false
+    pub start_visible: Option<bool>
+}
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct UpdateElementRegister {
+    pub namespace: String,
+    pub instance_id: String,
+    /// Update visibility, if not set, value remains unchanged
+    pub visible: Option<bool>,
+    /// Variables. Replaces all variables on client
+    pub variables: Value
+}
 #[derive(Serialize, Deserialize, Debug, Clone)]
-#[serde(tag = "type")]
 #[serde(rename_all = "snake_case")]
+#[serde(untagged)]
 pub enum ClientSelection {
     /// Apply to a single steamid
-    Steamid(String),
+    Steamid { steamid: String },
     /// Apply to multiple steamids
-    Steamids(Vec<String>),
+    Steamids { steamids: Vec<String> },
     /// apply to all clients connected to server
-    All
+    All {  }
 }
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(tag = "type")]
@@ -57,10 +89,16 @@ pub enum ServerOutgoingEvent {
     PlayerJoined { steamid: String },
     PlayerLeft { steamid: String },
     GameState {}, // TODO: implement
-    RegisterTempUi { selection: ClientSelection,  elem_id: String, expires_seconds: Option<u64>, element: UITemplate },
-    CreateElement { selection: ClientSelection,  namespace: String, instance_id: String, template_id: String, /* TODO: other data */ },
-    UpdateElement { selection: ClientSelection, namespace: String, instance_id: String, variables: Value, visible: bool },
-    ChangeAudioState { selection: ClientSelection , source: String, state: u8, volume: Option<f32>, start_time: Option<f32>, repeat: Option<bool> }
+    RegisterTempUi { steamids: Option<Vec<String>>,  elem_id: String, expires_seconds: Option<u64>, element: UITemplate },
+    CreateElement { steamids: Option<Vec<String>>,
+        #[serde(flatten)]
+        registry: CreateElementRegister
+    },
+    UpdateElement { steamids: Option<Vec<String>>,
+        #[serde(flatten)]
+        registry: UpdateElementRegister
+    },
+    ChangeAudioState { steamids: Option<Vec<String>> , source: String, state: u8, volume: Option<f32>, start_time: Option<f32>, repeat: Option<bool> }
 
 }
 

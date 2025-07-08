@@ -14,7 +14,6 @@
 import { computed } from 'vue';
 import { TextListElementEntry } from '../../types.ts';
 import { useGlobalState } from '@/store/state.ts';
-import { useTemplate } from '../../util.ts';
 import ActionButton from '../ActionButton.vue';
 import Handlebars from 'handlebars'
 
@@ -29,8 +28,8 @@ const template = computed(() => {
 })
 
 const content = computed(() => {
-    if(!template.value) return ""
-    return useTemplate(template.value, store.variables)
+    if ( !template.value ) return ""
+    return template.value(store.variables)
 })
 </script>
 

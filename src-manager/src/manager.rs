@@ -8,7 +8,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use axum::extract::ws::Message;
 use futures_util::StreamExt;
 use jwt::{SignWithKey, VerifyWithKey};
-use log::{debug, warn};
+use log::{debug, trace, warn};
 use tokio::sync::{Mutex, MutexGuard};
 use serde::{Deserialize, Serialize};
 use sqlx::{MySqlPool, Pool};
@@ -266,26 +266,25 @@ impl ManagerInstance {
             //     }
             //     debug!("forwarded tmp ui to {} clients", steamids.len());
             // },
-            ServerOutgoingEvent::CreateElement { selection, namespace, instance_id, template_id } => {
-                self.perform_selection(&server, selection, |client| {
-                    debug!("forwarding update ui to client {}", client.id());
+            ServerOutgoingEvent::CreateElement { steamids, registry } => {
+                trace!("forwarding create element {} template {}{}", registry.instance_id, registry.namespace, registry.template_id);
+                self.perform_selection(&server, steamids, |client| {
+                    debug!("forwarding create ui to client {}", client.id());
                     client.send_request(&ClientIncomingRequest::CreateElement {
-                        namespace: namespace.clone(),
-                        instance_id: instance_id.to_string(),
-                        template_id: template_id.to_string()
+                        registry: registry.clone()
                     }).unwrap();
                 });
+                trace!("create element - done");
             },
-            ServerOutgoingEvent::UpdateElement { selection, namespace, instance_id, variables, visible } => {
-                self.perform_selection(&server, selection, |client| {
+            ServerOutgoingEvent::UpdateElement { steamids, registry } => {
+                trace!("forwarding update element {}", registry.instance_id);
+                self.perform_selection(&server, steamids, |client| {
                     debug!("forwarding update ui to client {}", client.id());
                     client.send_request(&ClientIncomingRequest::UpdateElement {
-                        namespace: namespace.clone(),
-                        instance_id: instance_id.to_string(),
-                        variables: variables.clone(),
-                        visible: *visible
+                        registry: registry.clone()
                     }).unwrap();
                 });
+                trace!("update element - done");
             },
             // ServerOutgoingEvent::ChangeAudioState {
             //     steamids, source, state, volume, start_time, repeat
@@ -298,26 +297,28 @@ impl ManagerInstance {
         Ok(())
     }
 
-    async fn perform_selection<F>(&mut self, server: &Server, selection: &ClientSelection, mut closure: F) -> Result<(), SteamIDError>
+    async fn perform_selection<F>(&mut self, server: &Server, client_ids: &Option<Vec<String>>, mut closure: F) -> Result<(), SteamIDError>
         where F: FnMut(MutexGuard<ClientInstance>) -> ()
     {
         let server = server.lock().await;
         let server_clients = server.client_ids();
         drop(server);
 
-        let client_ids: Result<Vec<SteamID>, SteamIDError> = match selection {
-            ClientSelection::Steamid(s) => Ok(vec![SteamID::from_steam2(s)?]),
-            ClientSelection::Steamids(steamids) => steamids.iter().map(|s| SteamID::from_steam2(s)).collect(),
-            ClientSelection::All => Ok(server_clients.clone())
-        };
-        let client_ids = client_ids?;
-
+        let mut client_ids: Vec<SteamID> = client_ids.as_ref()
+            // .map(|s| SteamID::from_steam2(s))
+            .map(|vec| vec.iter().map(|s| SteamID::from_steam2(s)).collect())
+            .unwrap_or_else(|| Ok(server_clients.clone()))?;
+        // Filter out clients that aren't connected
+        client_ids.retain(|id| server_clients.contains(id));
+        // let client_ids: Result<Vec<SteamID>, SteamIDError> = match selection {
+        //     ClientSelection::Steamid(s) => Ok(vec![SteamID::from_steam2(s)?]),
+        //     ClientSelection::Steamids(steamids) => steamids.iter().map(|s| SteamID::from_steam2(s)).collect(),
+        //     ClientSelection::All => Ok(server_clients.clone())
+        // };
         for client_id in &client_ids {
-            if server_clients.contains(client_id) {
-                if let Some(client) = self.get_client_from_steamid(&client_id) {
-                    let mut client = client.lock().await;
-                    closure(client);
-                }
+            if let Some(client) = self.get_client_from_steamid(&client_id) {
+                let mut client = client.lock().await;
+                closure(client);
             }
         }
         Ok(())

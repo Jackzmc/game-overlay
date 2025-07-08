@@ -38,6 +38,7 @@
         </div>
     </header>
     <div ref="body" :class="['card-body',stateClass,contentClass??'card-content',textColorClass,{'can-scroll': store.interactable}]" :style="contentStyle" v-show="isVisibleContent">
+        id/{{ props.id }} template/{{ props.templateId }}
         <slot></slot>
         <br>
     </div>
@@ -68,6 +69,7 @@ const props = defineProps<{
     instance: ElementInstance,
     id: string,
     instanceTemplate: ElementTemplate,
+    templateId: string,
     official?: boolean
     contentClass?: string
 }>()
