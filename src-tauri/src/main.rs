@@ -15,15 +15,18 @@ use std::path::PathBuf;
 use sysinfo::{Pid, ProcessStatus, System};
 use tauri::{AppHandle, LogicalPosition, Manager, PhysicalPosition, Position, Size, State, Url, UserAttentionType, Window};
 use std::sync::{Arc, Mutex, OnceLock};
+use std::thread::sleep;
 use std::time::Duration;
 use active_win_pos_rs::get_active_window;
 use dotenvy::dotenv;
-use tungstenite::{connect, Message};
+use tungstenite::{connect, Error, Message};
 use log::{error, trace};
 use once_cell::sync::Lazy;
 use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use tokio::task::JoinHandle;
+use overlay_manager::{ClientIncomingRequest, UITemplate};
 use crate::manager::{OverlayManagerInstance, start_manager_read_thread};
 
 
@@ -47,7 +50,7 @@ struct AppData {
     config_file_path: PathBuf,
     config: AppConfig,
     http_url: Url,
-    element_cache: HashMap<String, overlay_manager::UIElement>
+    element_cache: HashMap<String, UITemplate>
 }
 #[derive(Serialize, Deserialize)]
 pub struct AppConfig {
@@ -106,7 +109,7 @@ fn init_data() -> AppData {
 }
 
 fn main() {
-    dotenv();
+    dotenv().ok();
     if env::var("RUST_LOG").is_err() {
         env::set_var("RUST_LOG", format!("warn,{}=info", env!("CARGO_PKG_NAME")));
     }
@@ -240,7 +243,7 @@ fn start_process_check_thread(window: tauri::Window) {
 }
 
 #[tauri::command]
-async fn fetch_template(data: State<'_, Mutex<AppData>>, namespace: String, id: String) -> Result<Option<overlay_manager::UIElement>, String> {
+async fn fetch_template(data: State<'_, Mutex<AppData>>, namespace: String, id: String) -> Result<Option<overlay_manager::UITemplate>, String> {
     let url = {
         let data = data.lock().unwrap();
         let mut url = data.http_url.clone();
@@ -285,12 +288,19 @@ fn overlay_key(window: Window, data: State<Mutex<AppData>>) -> bool {
 }
 
 #[tauri::command]
-fn perform_action(data: State<'_, Mutex<AppData>>, instance_id: String, namespace: String, command: String, input: Option<String>) -> Result<String, String> {
+async fn perform_action(data: State<'_, Mutex<AppData>>, instance_id: String, namespace: String, command: String, input: Option<String>) -> Result<(), ()> {
     // built in actions?
     //overlay:create_element <input of spaces>
     let lock = data.lock().unwrap();
-    let manager = lock.manager.lock().unwrap();
-    manager.send_action(instance_id, namespace, command, input);
-
-    Err("not implemented".to_string())
+    let manager = lock.manager.clone();
+    drop(lock);
+    tokio::task::spawn_blocking(move || {
+        trace!("perform_action: acquiring lock");
+        let mut manager = manager.lock().unwrap();
+        debug!("perform_action action {namespace}:{command} from {instance_id}");
+        if let Err(e) = manager.send_action(instance_id, namespace.to_string(), command.to_string(), input) {
+            error!("perform_action {namespace}:{command} error: {e}");
+        };
+    });
+    Ok(())
 }

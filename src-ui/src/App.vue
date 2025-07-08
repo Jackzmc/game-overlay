@@ -4,6 +4,7 @@
     <component v-for="(instRegistry, id) in instances" :key="instRegistry.instanceId" 
       :is="instRegistry.templateRegistry.component" 
       :id="instRegistry.instanceId"
+      :template-id="instRegistry.templateId"
       :instance="instRegistry.instance" 
       :instance-template="instRegistry.templateRegistry.template"
       :official="instRegistry.templateId.startsWith('overlay')"
@@ -112,7 +113,7 @@ function createElement( templateId: string, data: ElementInstance ): InstanceReg
       }
     }
   }
-  console.debug("createElement", instanceId, "of template", templateId)
+  console.debug("createElement", instanceId, "of template", templateId, data.variables)
   instances.value[instanceId] = instance
   return instance
 }
@@ -234,32 +235,31 @@ function test() {
     //   ]
     // },
     hbTemplate: `
-      {{#if interactable}}
-        <div class="list">
-        {{#each players}}
-        <div class="list-item">
-          <div class="list-item-content">
-            <div class="list-item-title">
-              {{ this.name }}
-            </div>
-            <div class="list-item-description">
-              <span class="tag is-black">{{ this.steamid }}</span>
-            </div>
+      <div class="list">
+      {{#each players}}
+      <div class="list-item">
+        <div class="list-item-content">
+          <div class="list-item-title">
+            {{ this.name }}
           </div>
-          <div class="list-item-controls has-visible-pointer-controls">
-            <div class="buttons is-right">
-              <button class="button" data-action-id="overlay:create_element" data-action-data="test:player_info {{ this.steamid }}">
-                <span class="icon is-small">
-                  <i class="fas fa-ellipsis"></i>
-                </span>
-                <span>Open</span>
-              </button>
-            </div>
+          <div class="list-item-description">
+            <span class="tag is-black">{{ this.steamid }}</span>
           </div>
         </div>
-        {{/each}}
+        <div class="list-item-controls has-visible-pointer-controls">
+          <div class="buttons is-right">
+            <button class="button" data-action-id="jackzmc:show_player" data-action-input="{{ this.steamid }}">
+              <span class="icon is-small">
+                <i class="fas fa-ellipsis"></i>
+              </span>
+              <span>Open</span>
+            </button>
+          </div>
         </div>
-      {{/if}}`
+      </div>
+      {{/each}}
+      </div>
+      `
   } )
   createElement( "test:player_list", {
     variables: {
@@ -283,7 +283,7 @@ function test() {
     },
     state: {}
   })
-  registerTemplate( "test", "player_info", {
+  registerTemplate( "jackzmc", "player_info", {
     type: "text",
     defaults: {
       title: "Players"
@@ -365,6 +365,8 @@ function saveData() {
 }
 
 function loadData() {
+  return // TODO: temp
+
   let data = localStorage.getItem("instance_data")
   if(data)
     instances.value = JSON.parse(data)

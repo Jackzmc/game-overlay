@@ -1,5 +1,6 @@
 use std::io::ErrorKind;
-use std::net::TcpStream;
+use std::net::{IpAddr, SocketAddr, TcpStream};
+use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 use std::thread::sleep;
 use std::time::{Duration, Instant};
@@ -7,9 +8,11 @@ use log::{debug, error, info, trace};
 use serde::{Deserialize, Serialize};
 use serde::de::DeserializeOwned;
 use tauri::{Manager, Url, Window, WindowBuilder, WindowUrl};
-use tungstenite::stream::MaybeTlsStream;
-use tungstenite::{connect, Message, WebSocket};
+use tungstenite::stream::{MaybeTlsStream, NoDelay};
+use tungstenite::{client, connect, Error, HandshakeError, Message, WebSocket};
 use once_cell::unsync::Lazy;
+use tungstenite::handshake::client::Response;
+use tungstenite::util::NonBlockingError;
 use crate::{OverlayManager};
 use overlay_manager;
 use overlay_manager::ClientOutgoingEvent;
@@ -24,7 +27,8 @@ pub struct ClientAuthorized {
 pub struct OverlayManagerInstance {
     url: Url,
     socket: Option<WebSocket<MaybeTlsStream<TcpStream>>>,
-    connect_attempts: u16
+    connect_attempts: u16,
+    authorized: bool
 }
 
 
@@ -34,12 +38,21 @@ impl OverlayManagerInstance {
         Self {
             socket: None,
             url,
-            connect_attempts: 0
+            connect_attempts: 0,
+            authorized: false
         }
     }
     
-    pub fn reconnect(&mut self) -> tungstenite::Result<()> {
-        connect(&self.url).map(|(mut socket, response)| {
+    pub fn reconnect(&mut self) -> Result<(), String> {
+        self.authorized = false;
+        let addr = SocketAddr::new(IpAddr::from_str(self.url.host_str().unwrap()).unwrap(), self.url.port().unwrap());
+        let stream = TcpStream::connect(addr).unwrap();
+        stream.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+        // tungesteine makes this a pain for the handshake:
+        // stream.set_nonblocking(true).unwrap();
+        let stream = MaybeTlsStream::Plain(stream);
+        
+        client(&self.url, stream).map(|(socket, response)| {
             self.socket = Some(socket);
             self.connect_attempts = 0;
             info!("Connected to manager successfully");
@@ -47,7 +60,7 @@ impl OverlayManagerInstance {
         }).map_err(|e| {
             error!("Could not connect: {}", e.to_string());
             self.connect_attempts += 1;
-            e
+            e.to_string()
         })
     }
 
@@ -71,6 +84,7 @@ impl OverlayManagerInstance {
         loop {
             match self.read::<overlay_manager::ClientIncomingRequest>() {
                 Ok(Some(overlay_manager::ClientIncomingRequest::Authorized {steamid2, auth_token, user})) => {
+                    self.authorized = true;
                     return Ok(ClientAuthorized {
                         steamid2,
                         user,
@@ -103,8 +117,10 @@ impl OverlayManagerInstance {
         if self.socket.is_none() {
             return Err("Not connected to socket".to_string());
         }
+        trace!("send: pre");
         let socket = self.socket.as_mut().unwrap();
         socket.send(msg).map_err(|e| e.to_string())?;
+        trace!("send: done");
         Ok(())
     }
 
@@ -114,16 +130,29 @@ impl OverlayManagerInstance {
             return Err(tungstenite::Error::ConnectionClosed);
         }
         // send disconnect
-        let msg = self.socket.as_mut().unwrap().read()?;
-        Ok(if msg.is_text() {
-            // TODO: make own error type for this cause
-            Some(serde_json::from_str(&msg.into_text().unwrap()).expect("could not serialize read()"))
-        } else {
-            None
-        })
+        let socket = self.socket.as_mut().unwrap();
+        match socket.read() {
+            Ok(msg) => {
+                Ok(msg.into_text().map(|text| {
+                    serde_json::from_str(&text).expect("could not serialize read()")
+                }).ok())
+            },
+            Err(e) => {
+                // if let Error::AlreadyClosed() = e || Error::ConnectionClosed
+                Err(e)
+            }
+        }
     }
     
     pub fn send_action(&mut self, instance_id: String, namespace: String, command: String, input: Option<String>) -> Result<(), String> {
+        // Block until authorized
+        let instant = Instant::now();
+        while !self.authorized || instant.elapsed().as_secs() > 30 {
+            sleep(Duration::from_secs(1));
+        }
+        if !self.authorized {
+            return Err("Authentication time out".to_string());
+        }
         let str = serde_json::to_string(&ClientOutgoingEvent::Action {
             command,
             namespace,
@@ -191,7 +220,7 @@ pub fn start_manager_read_thread(window: Window, manager: OverlayManager) {
                 },
                 Err(e) => {
                     eprintln!("read error: {}", e);
-                    if let tungstenite::Error::Io(ref io) = e {
+                    if let tungstenite::Error::Io(_) = e {
                         window.emit("manager", overlay_manager::ClientIncomingRequest::ManagerDisconnected).unwrap();
                         while let Some(duration) = manager.reconnect_delayed() {
                             sleep(duration);

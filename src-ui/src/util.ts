@@ -3,41 +3,42 @@ import { createDirectives } from 'marked-directive'
 import DOMPurify from 'dompurify'
 import { Color } from './types.ts'
 import { invoke } from '@tauri-apps/api'
+import createDOMPurify from 'dompurify'
 
-
-
-DOMPurify.addHook( 'afterSanitizeAttributes', function ( node, data, config ) {
-  // Set text node content to uppercase
-  if ( node.nodeName && node.nodeName.toLowerCase() === 'a' || node.nodeName.toLowerCase() === 'button' ) {
-    const href = node.getAttribute('href')
-    if(href && !node.hasAttribute('onclick')) {
-        node.setAttribute('target', '_blank')
-        node.setAttribute('onclick', `return confirm("Are you sure you want to navigate to ${href}?")`)
-    } else if ( !node.hasAttribute( 'onclick' ) && node.hasAttribute( "data-action" ) ) {
-      const [namespace, command] = node.getAttribute("data-action")!.split(":")
-      node.setAttribute( "onclick", `window.InvokeAction("${namespace}", "${command}")`)
-    }
-  }
-} );
-
-async function InvokeAction( namespace: string, command: string ) {
-  console.debug( "window.InvokeAction", { namespace, command } )
-  await invoke( "perform_action", { namespace, command } )
+async function InvokeAction( namespace: string, command: string, input: string, source: string = "" ) {
+  console.debug( "window.InvokeAction", { namespace, command, input } )
+  // don't await, if it hangs
+  invoke( "perform_action", { namespace, command, input, instanceId: source } )
 }
 //@ts-expect-error TODO: add to d.ts
 window.InvokeAction = InvokeAction
 
-export function sanitize(content: string) {
-  return DOMPurify.sanitize(content)
+export function setupPurifier(source?: string) {
+  const purifier = createDOMPurify()
+  purifier.addHook( 'afterSanitizeAttributes', function ( node, data, config ) {
+    onAfterSanitizeAttributes(node, data, config, source)
+  } );
+  purifier.setConfig( {
+    SANITIZE_NAMED_PROPS: true,
+    ALLOWED_TAGS: ['b', 'pre', 'i', 'em', 'strong', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'p', 'div', 'img', 'a', 'span', 'button', 'buttons'],
+    ALLOWED_ATTR: ['style', 'class', 'href', 'src', "data-action", "onclick"],
+  } )
+  return purifier
 }
-export function useTemplate(template: HandlebarsTemplateDelegate, variables: Record<string, any>) {
-  return DOMPurify.sanitize(template(variables), {
-      SANITIZE_NAMED_PROPS: true,
-      ALLOWED_TAGS: ['b', 'pre', 'i', 'em', 'strong', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'p', 'div', 'img', 'a', 'span', 'button', 'buttons'], 
-      ALLOWED_ATTR: ['style','class', 'href', 'src', "data-action", "onclick"],
-      
-      
-  })
+
+function onAfterSanitizeAttributes( node: Element, data: DOMPurify.HookEvent, config: DOMPurify.Config, source: string = "" ) {
+  if ( node.nodeName && node.nodeName.toLowerCase() === 'a' || node.nodeName.toLowerCase() === 'button' ) {
+    const href = node.getAttribute( 'href' )
+    if ( href && !node.hasAttribute( 'onclick' ) ) {
+      node.setAttribute( 'target', '_blank' )
+      node.setAttribute( 'onclick', `return confirm("Are you sure you want to navigate to ${href}?")` )
+    } else if ( !node.hasAttribute( 'onclick' ) && node.hasAttribute( "data-action-id" ) ) {
+      const [namespace, command] = node.getAttribute( "data-action-id" )!.split( ":" )
+      const input = node.getAttribute( "data-action-input" )
+      // Setting onclick directly doesn't seem to work, so hacky way of using a global function and call it:
+      node.setAttribute( "onclick", `window.InvokeAction("${namespace}", "${command}", "${input}", "${source}")` )
+    }
+  }
 }
 
 const marked = new Marked()

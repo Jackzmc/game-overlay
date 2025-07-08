@@ -1,5 +1,5 @@
 <template>
-<BaseElement :instance="instance" :id="id" :instance-template="instanceTemplate" :official="official" @state="updateState">
+<BaseElement :instance="instance" :id="id" :template-id="templateId" :instance-template="instanceTemplate" :official="official" @state="updateState">
     <span class="content" v-html="content" />
 </BaseElement>
 </template>
@@ -7,12 +7,15 @@
 <script setup lang="ts">
 import BaseElement from './BaseElement.vue';
 import { ElementInstance, ElementState, StateKeys, TextElementTemplate } from '../../types.ts';
-import { useTemplate } from '../../util.ts'
+import { setupPurifier } from '../../util.ts'
 import { computed, onMounted, ref, watch } from 'vue';
 import { useGlobalState } from '../../store/state.ts';
 import Handlebars from 'handlebars'
+import { DOMPurifyI } from 'dompurify';
 
 const store = useGlobalState()
+
+let purifier: DOMPurifyI
 
 const emit = defineEmits<{
   (e: 'state', key: StateKeys, value: any): void
@@ -23,6 +26,7 @@ const props = defineProps<{
     instance: ElementInstance,
     id: string,
     instanceTemplate: TextElementTemplate,
+    templateId: string,
     official?: boolean
 }>()
 const variables = computed(() => {
@@ -34,25 +38,27 @@ const variables = computed(() => {
 let handlebarsTemplate: HandlebarsTemplateDelegate|null = null
 function compileHandlebarsTemplate() {
     try {
-        console.time( `compileTemplate:${props.instance}` )
         handlebarsTemplate = Handlebars.compile(props.instanceTemplate.hbTemplate)
         computeContent()
-        console.timeEnd( `compileTemplate:${props}` )
     } catch(err) {
         handlebarsTemplate = null
         content.value = "!!TEMPLATE FAILED!!"
-        console.error("template error:", (err as any).message)
+        console.error( "template error:", ( err as any ).message )
+        console.timeEnd( `compileTemplate:${props}` )
     }
 } 
 function computeContent() {
-    if(!handlebarsTemplate) return
-    content.value = useTemplate(handlebarsTemplate, variables.value)
+    if ( !handlebarsTemplate || !purifier ) return
+    content.value = purifier.sanitize( handlebarsTemplate(variables.value) )
 }
 
 // watch(() => variables, computeContent)
 watch(() => variables, compileHandlebarsTemplate)
 watch(() => props.instanceTemplate.hbTemplate, compileHandlebarsTemplate)
-onMounted(() => compileHandlebarsTemplate())
+onMounted( () => {
+    purifier = setupPurifier(props.id)
+    compileHandlebarsTemplate()
+})
 
 function updateState(key: StateKeys, value: any) {
     emit("state", key, value)

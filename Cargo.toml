@@ -1,6 +1,13 @@
 [workspace]
-resolver = "2"
+resolver = "3"
 members = [
     "src-tauri",
-    "src-manager"
+    "src-manager",
+#    "src-overlay"
 ]
+exclude = ["src-overlay"]
+
+#[workspace.package]
+#edition = "2021"
+#license = "MIT"
+#repository = "https://github.com/jackzmc/game-overlay"
