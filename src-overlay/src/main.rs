@@ -2,7 +2,7 @@
 
 use std::net::{IpAddr, SocketAddr};
 use std::time::Instant;
-use egui::DragValue;
+use egui::{Align2, DragValue, RichText};
 use egui_overlay::EguiOverlay;
 use egui_overlay::egui_render_three_d::ThreeDBackend as DefaultGfxBackend;
 
@@ -24,7 +24,8 @@ struct PlayerInfo {
 
 struct OverlayState {
     server: Option<ServerInfo>,
-    initialized: bool
+    initialized: bool,
+    startup_message_remain: Option<Instant>
 }
 
 fn main() {
@@ -34,7 +35,7 @@ fn main() {
         .with(fmt::layer())
         .with(
             EnvFilter::try_from_default_env()
-                .unwrap_or(EnvFilter::new("debug,wgpu=warn,naga=warn")),
+                .unwrap_or(EnvFilter::new("overlay_ui=debug,warn")),
         )
         .init();
 
@@ -50,7 +51,8 @@ fn main() {
                 steamid: "1".to_string(),
             }
         }),
-        initialized: false
+        initialized: false,
+        startup_message_remain: Some(Instant::now())
     };
     egui_overlay::start(state);
 }
@@ -66,6 +68,27 @@ impl EguiOverlay for OverlayState {
             self.initialized = true;
             glfw_backend.set_window_size([2560.0, 1440.0]);
         }
+
+        if let Some(startup_msg_time) = self.startup_message_remain {
+            egui::Window::new("welcome_message")
+                // .default_pos(egui::pos2(200.0, 400.0))
+                .anchor(Align2::RIGHT_TOP, egui::vec2(-15.0, 15.0))
+                .title_bar(false)
+                .fade_in(true)
+                .fade_out(true)
+                .show(egui_context, |ui| {
+                    ui.label("Detected left4dead2");
+                    ui.label("Connect to a supported server to use the overlay");
+
+                    ui.add_space(14.0);
+                    ui.label("Open the overlay with CTRL+HOME");
+                });
+            // End the message
+            if startup_msg_time.elapsed().as_secs() > 8 {
+                self.startup_message_remain = None;
+            }
+        }
+
         // just some controls to show how you can use glfw_backend
         egui::Window::new("controls").show(egui_context, |ui| {
             ui.set_width(300.0);
@@ -151,7 +174,9 @@ impl EguiOverlay for OverlayState {
             }
         });
 
-        egui::Window::new("settings").show(egui_context, |ui| {
+
+
+        egui::Window::new("state").show(egui_context, |ui| {
             if let Some(server) = &self.server {
                 ui.label(format!("Connected to {} ({})", server.name, server.ip_addr));
                 ui.label(format!("Playing for {} minute(s)", server.connected_time.elapsed().as_secs() / 64));
@@ -159,14 +184,9 @@ impl EguiOverlay for OverlayState {
             }
         });
 
-        // here you decide if you want to be passthrough or not.
-        if egui_context.wants_pointer_input() || egui_context.wants_keyboard_input() {
-            // we need input, so we need the window to be NOT passthrough
-            glfw_backend.set_passthrough(false);
-        } else {
-            // we don't care about input, so the window can be passthrough now
-            glfw_backend.set_passthrough(true)
-        }
-        egui_context.request_repaint();
+        let needs_controls = egui_context.wants_pointer_input() || egui_context.wants_keyboard_input();
+        glfw_backend.set_passthrough(!needs_controls);
+
+        // egui_context.request_repaint();
     }
 }
