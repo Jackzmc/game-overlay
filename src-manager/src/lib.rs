@@ -13,8 +13,7 @@ pub enum ClientIncomingRequest {
     GameData {}, // TODO: implement
     Authorized { steamid2: String, auth_token: String, user: SteamUser },
     // Manual activation for UI side:
-    ManagerDisconnected,
-    ManagerConnected,
+    ManagerConnState(ManagerConnState),
     RegisterTempElement { elem_id: String, expires_seconds: Option<u64>, element: UITemplate },
     // Clients will fetch UI if received (with visibility=true)
     CreateElement {
@@ -26,6 +25,19 @@ pub enum ClientIncomingRequest {
         registry: UpdateElementRegister
     },
     ChangeAudioState { source: String, state: u8, volume: Option<f32>, start_time: Option<f32>, repeat: Option<bool> }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Represents the state of the manager's connection
+pub enum ManagerConnState {
+    /// Manager has been disconnected
+    Disconnected { reason: Option<String> },
+    /// Manager is connected, either for first time or reconnected.
+    /// May or may not be authenticated
+    Connected,
+    /// Manager is connected, has sent auth details, is waiting for response
+    /// ClientIncomingRequest:Authorized sent if authorized
+    WaitingForAuth,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
