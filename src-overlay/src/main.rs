@@ -5,6 +5,7 @@ mod manager;
 mod templates;
 
 mod defs;
+mod registry;
 
 use std::collections::HashMap;
 use std::env;

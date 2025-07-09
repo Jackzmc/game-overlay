@@ -1,15 +1,16 @@
 use std::any::Any;
-use std::collections::HashMap;
 use std::fmt::{Debug, Display};
 use std::sync::Arc;
-use egui_overlay::egui_render_three_d::three_d::Context;
+use egui::Color32;
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::Value;
 use strum_macros::EnumString;
 use uuid::Uuid;
 use crate::defs::ServerInfo;
 
 pub mod list_player;
+pub mod generic;
+
 pub trait Template/*<State> where State: Serialize + Deserialize + Debug*/ {
     /// The ID of the template, usually UUID
     fn id(&self) -> &str;
@@ -22,30 +23,6 @@ pub trait Template/*<State> where State: Serialize + Deserialize + Debug*/ {
 }
 
 pub type TemplateInstance = Arc<Box<dyn Template>>;
-pub struct Registry {
-    list: HashMap<String, TemplateInstance>,
-}
-impl Registry {
-    pub fn new() -> Self {
-        Self { list: HashMap::new() }
-    }
-
-    /// Registers a new template
-    /// full_id: should be namespaced, such as overlay:my_template
-    pub fn register(&mut self, full_id: &str, template: impl Template + 'static) {
-        self.list.insert(full_id.into(), Arc::new(Box::new(template)));
-    }
-
-    /// Get a template by
-    pub fn get(&self, id: TemplateId) -> Option<TemplateInstance> {
-        self.list.get(&id.to_string()).cloned()
-    }
-
-    /// Get a template by full id
-    pub fn get_2(&self, id: &str) -> Option<TemplateInstance> {
-        self.list.get(id).cloned()
-    }
-}
 
 #[derive(Debug, PartialEq, EnumString, Default, strum_macros::Display)]
 pub enum CoreTemplate {
@@ -105,5 +82,20 @@ impl Element {
             template: template.clone(),
             state,
         }
+    }
+}
+
+pub struct TemplateInvalid;
+
+impl Template for TemplateInvalid {
+    fn id(&self) -> &str { "overlay:invalid" }
+
+    fn is_state_valid(&self, state: &ElementState) -> Result<(), String> {
+        Ok(())
+    }
+
+    fn render(&self, ui: &mut egui::Ui, server: &ServerInfo, state: &mut ElementState) {
+        let template_id = state["template"].as_str().unwrap_or("[null]");
+            ui.colored_label(Color32::RED, format!("Template \"{}\" does not exist", template_id));
     }
 }

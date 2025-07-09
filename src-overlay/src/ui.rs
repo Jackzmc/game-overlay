@@ -1,30 +1,24 @@
-use strum_macros::EnumString;
 use std::fmt::Display;
 use std::net::SocketAddr;
 use std::ops::Sub;
 use std::str::FromStr;
 use std::time::{Duration, Instant, SystemTime};
-use egui::{Align, Align2, CollapsingHeader, Color32, DragValue, FontFamily, FontId, Label, Layout, Margin, RichText, TextFormat, Theme, Widget};
+use egui::{pos2, Align2, Color32, FontId, TextFormat, Theme};
 use egui::text::LayoutJob;
-use egui::UiKind::Popup;
-use egui::X11WindowType::PopupMenu;
-use egui_extras::Column;
-use egui_overlay::egui_render_three_d::three_d::Color;
+use egui_extras::install_image_loaders;
 use egui_overlay::EguiOverlay;
 use egui_overlay::egui_render_three_d::ThreeDBackend as DefaultGfxBackend;
-use overlay_manager::{ClientIncomingRequest, ManagerConnState};
+use overlay_manager::ClientIncomingRequest;
 use serde_json::{json, Value};
 use tokio::sync::broadcast::Receiver;
-use tracing::debug;
-use tracing::field::debug;
-use tracing::log::trace;
-use uuid::{uuid, Uuid};
 pub(crate) use crate::defs::{PlayerInfo, PlayerTeam, ServerInfo};
 use crate::defs::{TeamConfig, TeamShow};
-use crate::manager::{OverlayManager, OverlayManagerInstance};
-use crate::templates::list_player::{Template_ListPlayers};
-use crate::templates::{CoreTemplate, Element, Registry, Template, TemplateId};
-
+use crate::manager::OverlayManager;
+use crate::registry::Registry;
+use crate::templates::list_player::TemplateListPlayers;
+use crate::templates::{Element, Template};
+use crate::templates::CoreTemplate::GenericText;
+use crate::templates::generic::{TemplateGenericImage, TemplateGenericText};
 
 pub struct OverlayData {
     manager: OverlayManager,
@@ -53,7 +47,10 @@ enum UIState {
 impl OverlayData {
     pub fn example(manager: OverlayManager, rx: Receiver<ClientIncomingRequest>) -> Self {
         let mut registry = Registry::new();
-        registry.register("overlay:list_players", Template_ListPlayers {});
+        registry.register("overlay:list_players", TemplateListPlayers {});
+        registry.register("overlay:generic_text", TemplateGenericText);
+        registry.register("overlay:generic_image", TemplateGenericImage);
+
         OverlayData {
             manager,
             server: Some(ServerInfo {
@@ -127,9 +124,7 @@ impl OverlayData {
             ui_state: UIState::Inactive,
             read_rx: rx,
             elements: vec![
-                Element::temp(registry.get_2("overlay:list_players").unwrap(), json!({
-                    "apples": true,
-                    "count": 0,
+                registry.try_temp("overlay:list_players", json!({
                     "actions": {
                        "STEAM_1:0:49243767": [
                             {
@@ -143,22 +138,11 @@ impl OverlayData {
                         ]
                     }
                 })),
-                Element::temp(registry.get_2("overlay:list_players").unwrap(), json!({ "invalid": true }))
-                // Element::temp(TemplateId::Core(CoreTemplate::ListPlayers), json!({
-                //     "actions": {
-                //         "STEAM_1:0:49243767": [
-                //             {
-                //                 "label": "Kill Player",
-                //                 "command": "sm_slay #STEAM_1_0_49243767"
-                //             },
-                //             {
-                //                 "label": "Kick Player",
-                //                 "command": "sm_kick #23"
-                //             }
-                //         ]
-                //     }
-                // })),
-                // Element::temp(TemplateId::Core(CoreTemplate::GenericText), Value::default())
+                registry.try_temp("overlay:list_players", json!({ "invalid": true })),
+                registry.try_temp("overlay:invalid_test", Value::Null),
+                registry.try_temp("overlay:generic_text", json!({ "content": "Hello"})),
+                registry.try_temp("overlay:generic_image", json!({ "url": "https://cdn.jackz.me/img/steve.jpg" }))
+
             ],
             registry
         }
@@ -177,6 +161,7 @@ impl EguiOverlay for OverlayData {
         if !self.initialized {
             self.initialized = true;
             glfw_backend.set_window_size([2560.0, 1440.0]);
+            install_image_loaders(egui_context);
         }
         /// Process incoming payloads and pass to manager
         /* TODO:
@@ -248,6 +233,8 @@ impl EguiOverlay for OverlayData {
         }
 
         egui::Window::new("Dummy Player")
+            .default_open(false)
+            .default_pos(pos2(0.0, 0.0))
             .show(egui_context, |ui| {
                 ui.style_mut().spacing.item_spacing = egui::vec2(16.0, 12.0);
                 ui.columns(2, |cols| {
