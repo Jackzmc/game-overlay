@@ -1,37 +1,48 @@
+use std::any::Any;
 use std::collections::HashMap;
-use std::fmt::Display;
+use std::fmt::{Debug, Display};
 use std::sync::Arc;
 use egui_overlay::egui_render_three_d::three_d::Context;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use strum_macros::EnumString;
 use uuid::Uuid;
 use crate::defs::ServerInfo;
 
 pub mod list_player;
-pub trait Template {
+pub trait Template/*<State> where State: Serialize + Deserialize + Debug*/ {
     /// The ID of the template, usually UUID
     fn id(&self) -> &str;
 
-    fn render(&self, ui: &mut egui::Ui, server: &ServerInfo, variables: &mut Value);
+    /// Validate a state, returning Ok(()) if all fields are correct
+    /// Return Err(String) with a custom error if invalid, the element will show an error instead
+    fn is_state_valid(&self, state: &ElementState) -> Result<(), String> { Ok(()) }
+
+    fn render(&self, ui: &mut egui::Ui, server: &ServerInfo, state: &mut ElementState);
 }
 
+pub type TemplateInstance = Arc<Box<dyn Template>>;
 pub struct Registry {
-    list: HashMap<String, Arc<Box<dyn Template>>>,
+    list: HashMap<String, TemplateInstance>,
 }
 impl Registry {
     pub fn new() -> Self {
         Self { list: HashMap::new() }
     }
 
-    pub fn register(&mut self, full_id: &str, template: Box<dyn Template>) {
-        self.list.insert(full_id.into(), Arc::new(template));
+    /// Registers a new template
+    /// full_id: should be namespaced, such as overlay:my_template
+    pub fn register(&mut self, full_id: &str, template: impl Template + 'static) {
+        self.list.insert(full_id.into(), Arc::new(Box::new(template)));
     }
 
-    pub fn get(&self, id: TemplateId) -> Option<Arc<Box<dyn Template>>> {
+    /// Get a template by
+    pub fn get(&self, id: TemplateId) -> Option<TemplateInstance> {
         self.list.get(&id.to_string()).cloned()
     }
 
-    pub fn get_2(&self, id: &str) -> Option<Arc<Box<dyn Template>>> {
+    /// Get a template by full id
+    pub fn get_2(&self, id: &str) -> Option<TemplateInstance> {
         self.list.get(id).cloned()
     }
 }
@@ -75,23 +86,24 @@ impl Display for TemplateId {
     }
 }
 
+pub type ElementState = Value;
 pub struct Element {
     pub id: String,
-    pub template: Arc<Box<dyn Template>>,
-    pub variables: Value
+    pub template: TemplateInstance,
+    pub state: ElementState,
 }
 
 impl Element {
 
-    pub fn temp(template: Arc<Box<dyn Template>>, variables: Value) -> Self {
-        Self::with_id(Uuid::new_v4().to_string(), template, variables)
+    pub fn temp(template: TemplateInstance, state: ElementState) -> Self {
+        Self::with_id(Uuid::new_v4().to_string(), template, state)
     }
 
-    pub fn with_id(id: String, template: Arc<Box<dyn Template>>, variables: Value) -> Self {
+    pub fn with_id(id: String, template: TemplateInstance, state: ElementState) -> Self {
         Self {
             id,
             template: template.clone(),
-            variables,
+            state,
         }
     }
 }
