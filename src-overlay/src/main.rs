@@ -2,6 +2,9 @@
 
 mod ui;
 mod manager;
+mod templates;
+
+mod defs;
 
 use std::collections::HashMap;
 use std::env;
