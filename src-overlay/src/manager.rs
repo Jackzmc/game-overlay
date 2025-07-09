@@ -7,10 +7,6 @@ use std::thread::sleep;
 use std::time::{Duration, Instant};
 use serde::{Deserialize, Serialize};
 use serde::de::DeserializeOwned;
-use tungstenite::stream::{MaybeTlsStream, NoDelay};
-use tungstenite::{client, connect, Error, HandshakeError, Message, WebSocket};
-use tungstenite::handshake::client::Response;
-use tungstenite::util::NonBlockingError;
 use overlay_manager;
 use overlay_manager::{ClientIncomingRequest, ClientOutgoingEvent, ManagerConnState};
 use reqwest::Url;
@@ -18,6 +14,8 @@ use tokio::sync::broadcast;
 use tokio::sync::broadcast::{Receiver, Sender};
 use tracing::{debug, error, info};
 use tracing::log::trace;
+use tungstenite::stream::MaybeTlsStream;
+use tungstenite::{client, Message, WebSocket};
 
 pub struct ClientAuthorized {
     pub steamid2: String,
@@ -274,7 +272,7 @@ pub fn start_manager_read_thread(manager: OverlayManager) -> Receiver<ClientInco
                     Err(e) => {
                         eprintln!("read error: {}", e);
                         if let tungstenite::Error::Io(_) = e {
-                            // Lost connection, attempt to reconnect:
+                            // Losft connection, attempt to reconnect:
                             // tx.send(ClientIncomingRequest::ManagerConnState(ManagerConnState::Disconnected {
                             //     reason: Some("websocket_error".to_string())
                             // })).unwrap();
