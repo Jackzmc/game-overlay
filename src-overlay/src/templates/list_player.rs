@@ -9,30 +9,11 @@ use tracing::debug;
 use tracing::log::warn;
 use crate::defs::{ServerInfo, TeamShow};
 use crate::templates::{ElementState, Template};
-// struct Element {
-//     id: String,
-//     template_id: TemplateId,
-//     variables: Value
-// }
-
-
-
 
 #[derive(Default)]
-pub struct Template_ListPlayers;
+pub struct TemplateListPlayers;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ListPlayersState {
-    /// Key is user id
-    actions: HashMap<u32, Action>
-}
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Action {
-    command: String,
-    label: String
-}
-
-impl Template for Template_ListPlayers {
+impl Template for TemplateListPlayers {
     fn id(&self) -> &str { "overlay:list_players" }
 
     fn is_state_valid(&self, state: &ElementState) -> Result<(), String> {
@@ -93,13 +74,6 @@ impl Template for Template_ListPlayers {
                                                 }
                                             }
                                         }
-                                        // TODO: pull from elem
-                                        ui.button("Kick Player");
-                                        ui.button("Ban Player");
-                                        let response = ui.button("Perform Action");
-                                        // Popup::menu(&response)
-                                        //     .gap(4).align(Align2::LEFT_CENTER)
-                                        //     .show(|ui| { /* menu contents */ });
                                     });
                                     // ui.add_space(10.0);
                                 });
