@@ -12,163 +12,18 @@ use egui_extras::Column;
 use egui_overlay::EguiOverlay;
 use egui_overlay::egui_render_three_d::ThreeDBackend as DefaultGfxBackend;
 use overlay_manager::{ClientIncomingRequest, ManagerConnState};
-use serde_json::Value;
+use serde_json::{json, Value};
 use tokio::sync::broadcast::Receiver;
 use tracing::debug;
 use tracing::field::debug;
 use tracing::log::trace;
 use uuid::{uuid, Uuid};
+pub(crate) use crate::defs::{PlayerInfo, PlayerTeam, ServerInfo};
+use crate::defs::{TeamConfig, TeamShow};
 use crate::manager::{OverlayManager, OverlayManagerInstance};
+use crate::templates::list_player::{Template_ListPlayers};
+use crate::templates::{CoreTemplate, Element, Registry, Template, TemplateId};
 
-struct ServerInfo {
-    name: String,
-    ip_addr: SocketAddr,
-    connected_time: Instant,
-
-    players: Vec<PlayerInfo>,
-    my_player: PlayerInfo,
-
-    teams: Vec<TeamConfig>
-}
-impl ServerInfo {
-    pub fn get_team_config(&self, team: &PlayerTeam) -> Option<&TeamConfig> {
-        self.teams.get(team.0 as usize)
-    }
-    pub fn get_team_config_name(&self, team: &PlayerTeam) -> Option<&str> {
-        self.teams.get(team.0 as usize).map(|s| s.name.as_str())
-    }
-}
-
-// #[derive(FromRepr, Debug, PartialEq, Clone)]
-// #[repr(u8)]
-// enum Team {
-//     Unassigned = 0,
-//     Spectator = 1,
-//     Survivor,
-//     Infected,
-//     SurvivorBot
-// }
-
-/// Represents the team the player is in
-pub struct PlayerTeam(u8);
-#[derive(PartialEq)]
-enum TeamShow {
-    /// Team is hidden in the UI
-    Hidden,
-    /// Team is shown but collapsed
-    Collapsed,
-    /// Team is shown and is expanded
-    Open
-}
-/// Defines a team, with its ID and number
-struct TeamConfig { name: String, show: TeamShow }
-
-/// Represents a team for display purposes
-struct TeamCategory {
-    /// The displayed label for team
-    label: String,
-    /// If set, the team ID this entry is for
-    /// If not set, the first one found is a catch-all
-    team_id: Option<u8>
-}
-// impl Display for Team {
-//     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-//         match self {
-//             Team::Unassigned => write!(f, "Unassigned"),
-//             Team::Spectator => write!(f, "Spectator"),
-//             Team::Survivor => write!(f, "Survivor"),
-//             Team::Infected => write!(f, "Infected"),
-//             _ => write!(f, "Unknown"),
-//         }
-//     }
-// }
-
-struct PlayerInfo {
-    steamid: String,
-    name: String,
-    connected: SystemTime,
-    team: PlayerTeam,
-    is_idle: bool,
-    admin_perms: Option<String>,
-    health: f32
-}
-
-impl PlayerInfo {
-    pub fn label_name(&self) -> String {
-        if self.is_idle {
-            format!("{} [IDLE]", self.name)
-        } else if self.steamid == "BOT" {
-            format!("{} [BOT]", self.name)
-        } else {
-            self.name.to_string()
-        }
-    }
-}
-
-#[derive(Debug, PartialEq, EnumString)]
-enum TemplateNamespace {
-    #[strum(serialize = "overlay")]
-    Core(CoreTemplate),
-    Other(String, String)
-}
-#[derive(Debug, PartialEq, EnumString, Default, strum_macros::Display)]
-enum CoreTemplate {
-    #[strum(serialize = "invalid")]
-    #[default]
-    Invalid,
-
-    #[strum(serialize = "list_players")]
-    ListPlayers,
-    #[strum(serialize = "generic_text")]
-    GenericText,
-    #[strum(serialize = "generic_image")]
-    GenericImage,
-    #[strum(serialize = "motd")]
-    MOTD,
-}
-enum TemplateId {
-    Core(CoreTemplate),
-    Other(String, String)
-}
-impl TemplateId {
-    pub fn custom(namespace: &str, id: &str) -> Self {
-        Self::Other(namespace.to_string(), id.to_string())
-    }
-
-    pub fn core(core_template: CoreTemplate) -> Self {
-        Self::Core(core_template)
-    }
-}
-
-impl Display for TemplateId {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let str = match self {
-            TemplateId::Core(part) => format!("core:{}", part.to_string()),
-            TemplateId::Other(ns, part) => format!("{}:{}", ns, part)
-        };
-        write!(f, "{}", str)
-    }
-}
-
-struct Element {
-    id: String,
-    template_id: TemplateId,
-    variables: Value
-}
-
-impl Element {
-    pub fn temp(template_id: TemplateId, variables: Value) -> Self {
-        Self::with_id(Uuid::new_v4().to_string(), template_id, variables)
-    }
-
-    pub fn with_id(id: String, template_id: TemplateId, variables: Value) -> Self {
-        Self {
-            id,
-            template_id,
-            variables,
-        }
-    }
-}
 
 pub struct OverlayData {
     manager: OverlayManager,
@@ -180,7 +35,9 @@ pub struct OverlayData {
 
     read_rx: Receiver<ClientIncomingRequest>,
 
-    elements: Vec<Element>
+    elements: Vec<Element>,
+
+    registry: Registry
 }
 
 enum UIState {
@@ -194,6 +51,8 @@ enum UIState {
 
 impl OverlayData {
     pub fn example(manager: OverlayManager, rx: Receiver<ClientIncomingRequest>) -> Self {
+        let mut registry = Registry::new();
+        registry.register("overlay:list_players", Box::new(Template_ListPlayers {}));
         OverlayData {
             manager,
             server: Some(ServerInfo {
@@ -210,6 +69,7 @@ impl OverlayData {
                         admin_perms: Some("z".to_string()),
                         steamid: "STEAM_#:#:######".to_string(),
                         health: 96.0,
+                        user_id: 0,
                     },
                     PlayerInfo {
                         name: "Rochelle".to_string(),
@@ -219,6 +79,7 @@ impl OverlayData {
                         admin_perms: None,
                         steamid: "BOT".to_string(),
                         health: 25.0,
+                        user_id: 0,
                     },
                     PlayerInfo {
                         name: "Player 2".to_string(),
@@ -228,6 +89,7 @@ impl OverlayData {
                         admin_perms: Some("xz".to_string()),
                         steamid: "STEAM_#:#:######1".to_string(),
                         health: 36.0,
+                        user_id: 0,
                     },
                     PlayerInfo {
                         name: "Hunter".to_string(),
@@ -237,6 +99,7 @@ impl OverlayData {
                         admin_perms: None,
                         steamid: "BOT".to_string(),
                         health: 100.0,
+                        user_id: 0,
                     }
                 ],
                 my_player: PlayerInfo {
@@ -245,8 +108,9 @@ impl OverlayData {
                     team: PlayerTeam(2),
                     is_idle: false,
                     admin_perms: Some("z".to_string()),
-                    steamid: "STEAM_#:#:######2".to_string(),
+                    steamid: " STEAM_1:0:49243767".to_string(),
                     health: 96.0,
+                    user_id: 0,
                 },
                 // this should in future be pulled from server
                 teams: vec![
@@ -262,9 +126,27 @@ impl OverlayData {
             ui_state: UIState::Inactive,
             read_rx: rx,
             elements: vec![
-                Element::temp(TemplateId::Core(CoreTemplate::ListPlayers), Value::default()),
-                Element::temp(TemplateId::Core(CoreTemplate::GenericText), Value::default())
-            ]
+                Element::temp(registry.get_2("overlay:list_players").unwrap(), json!({
+                    "apples": true,
+                    "count": 0
+                }))
+                // Element::temp(TemplateId::Core(CoreTemplate::ListPlayers), json!({
+                //     "actions": {
+                //         "STEAM_1:0:49243767": [
+                //             {
+                //                 "label": "Kill Player",
+                //                 "command": "sm_slay #STEAM_1_0_49243767"
+                //             },
+                //             {
+                //                 "label": "Kick Player",
+                //                 "command": "sm_kick #23"
+                //             }
+                //         ]
+                //     }
+                // })),
+                // Element::temp(TemplateId::Core(CoreTemplate::GenericText), Value::default())
+            ],
+            registry
         }
     }
 }
@@ -330,14 +212,15 @@ impl EguiOverlay for OverlayData {
             }
         }
 
-        for elem in &self.elements {
-            egui::Window::new(elem.template_id.to_string())
+        for elem in &mut self.elements {
+            egui::Window::new(elem.template.id())
                 .id(elem.id.to_string().into())
                 .show(egui_context, |ui| {
                     ui.label(format!("ID: {}", elem.id));
-                    ui.label(format!("TemplateId: {}", elem.template_id));
-                    ui.label(format!("Variables: {}", elem.variables.to_string()));
+                    ui.label(format!("TemplateId: {}", elem.template.id()));
+                    ui.label(format!("State: {}", elem.variables.to_string()));
 
+                    elem.template.render(ui, self.server.as_ref().unwrap(), &mut elem.variables)
                 });
         }
 
@@ -444,83 +327,67 @@ impl EguiOverlay for OverlayData {
                 });
             });
 
-        egui::Window::new("Manage Players 2")
-            .default_pos(egui::pos2(500.0, 400.0))
-            .show(egui_context, |ui| {
-                {
-                    let mut style = ui.style_mut();
-                    style.spacing.item_spacing = egui::vec2(16.0, 8.0);
-                    style.spacing.window_margin = Margin::from(4.0);
-                }
-                struct Dummy {
-                    name: String,
-                    steamid: String,
-                    team: String,
-                    other: String
-                }
-                ui.label("4 Survivors, 1 Infected, 0 Spectators.");
-                let players = vec![Dummy {
-                    name: "Jackzie :heart:".to_string(),
-                    steamid: "STEAM_#:#:#####".to_string(),
-                    team: "Survivor".to_string(),
-                    other: "".to_string(),
-                }, Dummy {
-                    name: "Player 2".to_string(),
-                    steamid: "STEAM_#:#:#####".to_string(),
-                    team: "Survivor [IDLE]".to_string(),
-                    other: "".to_string(),
-                }, Dummy {
-                    name: "Rochelle".to_string(),
-                    steamid: "BOT".to_string(),
-                    team: "Survivor".to_string(),
-                    other: "".to_string(),
-                }];
-                egui::ScrollArea::horizontal().show(ui, |ui| {
-                    egui_extras::TableBuilder::new(ui)
-                        .column(Column::auto())
-                        .column(Column::exact(120.0))
-                        .column(Column::auto())
-                        .column(Column::auto())
-                        .header(20.0, |mut header| {
-                            header.col(|col| {
-                                col.strong("Name");
-                            });
-                            header.col(|col| {
-                               col.strong("SteamID");
-                            });
-                            header.col(|col| {
-                                col.strong("Team");
-                            });
-                            header.col(|col| {
-                                col.strong("?");
-                            });
-                        })
-                        .body(|mut body| {
-                            let server = self.server.as_ref().unwrap();
-                            for player in &server.players {
-                                body.row(20.0, |mut row| {
-                                    row.col(|col| {
-                                        col.label(&player.name);
-                                    });
-                                    row.col(|col| {
-                                        col.label(&player.steamid);
-                                    });
-                                    row.col(|col| {
-                                        col.label(server.get_team_config_name(&player.team).unwrap_or("unknown"));
-                                    });
-                                    row.col(|col| {
-                                        // col.label(player.other);
-                                        if col.button("View").clicked() {
-                                            debug!("open window");
-                                            // need to add to state
-                                        }
-                                    });
-                                })
-                            }
-                        })
-
-                });
-            });
+        // egui::Window::new("Manage Players 2")
+        //     .default_pos(egui::pos2(500.0, 400.0))
+        //     .show(egui_context, |ui| {
+        //         {
+        //             let mut style = ui.style_mut();
+        //             style.spacing.item_spacing = egui::vec2(16.0, 8.0);
+        //             style.spacing.window_margin = Margin::from(4.0);
+        //         }
+        //         struct Dummy {
+        //             name: String,
+        //             steamid: String,
+        //             team: String,
+        //             other: String
+        //         }
+        //         ui.label("4 Survivors, 1 Infected, 0 Spectators.");
+        //         egui::ScrollArea::horizontal().show(ui, |ui| {
+        //             egui_extras::TableBuilder::new(ui)
+        //                 .column(Column::auto())
+        //                 .column(Column::exact(120.0))
+        //                 .column(Column::auto())
+        //                 .column(Column::auto())
+        //                 .header(20.0, |mut header| {
+        //                     header.col(|col| {
+        //                         col.strong("Name");
+        //                     });
+        //                     header.col(|col| {
+        //                        col.strong("SteamID");
+        //                     });
+        //                     header.col(|col| {
+        //                         col.strong("Team");
+        //                     });
+        //                     header.col(|col| {
+        //                         col.strong("?");
+        //                     });
+        //                 })
+        //                 .body(|mut body| {
+        //                     let server = self.server.as_ref().unwrap();
+        //                     for player in &server.players {
+        //                         body.row(20.0, |mut row| {
+        //                             row.col(|col| {
+        //                                 col.label(&player.name);
+        //                             });
+        //                             row.col(|col| {
+        //                                 col.label(&player.steamid);
+        //                             });
+        //                             row.col(|col| {
+        //                                 col.label(server.get_team_config_name(&player.team).unwrap_or("unknown"));
+        //                             });
+        //                             row.col(|col| {
+        //                                 // col.label(player.other);
+        //                                 if col.button("View").clicked() {
+        //                                     debug!("open window");
+        //                                     // need to add to state
+        //                                 }
+        //                             });
+        //                         })
+        //                     }
+        //                 })
+        //
+        //         });
+        //     });
 
 
         egui::Window::new("Manage Players")
@@ -560,6 +427,9 @@ impl EguiOverlay for OverlayData {
                                                 cols[0].label("Team");
                                                 cols[1].label(&team.name);
 
+                                                cols[0].label("User Id");
+                                                cols[1].label(format!("#{}", player.user_id));
+
                                                 cols[0].label("Admin Permissions");
                                                 cols[1].label(player.admin_perms.as_ref().map(|s| s.clone()).unwrap_or("-".to_string()));
 
@@ -568,6 +438,7 @@ impl EguiOverlay for OverlayData {
                                             });
                                             ui.add_space(8.0);
                                             ui.horizontal(|ui| {
+                                                // TODO: pull from elem
                                                 ui.button("Kick Player");
                                                 ui.button("Ban Player");
                                                 let response = ui.button("Perform Action");
