@@ -2,9 +2,13 @@ use std::collections::HashMap;
 use egui::{Align, CollapsingHeader, Layout, Margin, RichText, Window};
 use egui::scroll_area::State;
 use egui_overlay::egui_render_three_d::three_d::Context;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use serde_json::Value::Null;
+use tracing::debug;
+use tracing::log::warn;
 use crate::defs::{ServerInfo, TeamShow};
-use crate::templates::Template;
+use crate::templates::{ElementState, Template};
 // struct Element {
 //     id: String,
 //     template_id: TemplateId,
@@ -17,9 +21,26 @@ use crate::templates::Template;
 #[derive(Default)]
 pub struct Template_ListPlayers;
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ListPlayersState {
+    /// Key is user id
+    actions: HashMap<u32, Action>
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Action {
+    command: String,
+    label: String
+}
+
 impl Template for Template_ListPlayers {
     fn id(&self) -> &str { "overlay:list_players" }
-    fn render(&self, ui: &mut egui::Ui, server: &ServerInfo, state: &mut Value) {
+
+    fn is_state_valid(&self, state: &ElementState) -> Result<(), String> {
+        if state["actions"].is_null() { return Err("'actions' field is missing".to_string()) };
+        Ok(())
+    }
+
+    fn render(&self, ui: &mut egui::Ui, server: &ServerInfo, state: &mut ElementState) {
         {
             let mut style = ui.style_mut();
             style.spacing.item_spacing = egui::vec2(16.0, 8.0);
@@ -63,6 +84,15 @@ impl Template for Template_ListPlayers {
                                     });
                                     ui.add_space(8.0);
                                     ui.horizontal(|ui| {
+                                        if let Some(actions) = state["actions"][&player.steamid].as_array(){
+                                            for action in actions {
+                                                let name = action["label"].as_str().unwrap_or("?");
+                                                if ui.button(name).clicked() {
+                                                    let cmd = action["command"].as_str();
+                                                    debug!("pressed {} -> {:?}", name, cmd);
+                                                }
+                                            }
+                                        }
                                         // TODO: pull from elem
                                         ui.button("Kick Player");
                                         ui.button("Ban Player");
