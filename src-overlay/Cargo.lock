@@ -3004,7 +3004,7 @@ dependencies = [
  "serde_qs",
  "sha2",
  "sqlx",
- "steamid-ng",
+ "steamid-ng 1.0.0",
  "tokio",
  "tokio-stream",
  "tokio-tungstenite 0.21.0",
@@ -3028,6 +3028,7 @@ dependencies = [
  "reqwest",
  "serde",
  "serde_json",
+ "steamid-ng 2.0.0",
  "strum",
  "strum_macros",
  "sysinfo",
@@ -4347,6 +4348,12 @@ dependencies = [
  "serde_derive",
  "thiserror 1.0.69",
 ]
+
+[[package]]
+name = "steamid-ng"
+version = "2.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b23da1d8a59091a1e8805d1355f74181f8e13fb7b446c2de17b9fd1bacce6058"
 
 [[package]]
 name = "strict-num"

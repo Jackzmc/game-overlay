@@ -3,7 +3,8 @@ use std::net::SocketAddr;
 use std::ops::Sub;
 use std::str::FromStr;
 use std::time::{Duration, Instant, SystemTime};
-use egui::{pos2, Align2, Color32, FontId, TextFormat, Theme};
+use egui::{pos2, vec2, Align2, Button, Color32, FontId, TextEdit, TextFormat, Theme, Widget};
+use egui::ImageSource::Uri;
 use egui::text::LayoutJob;
 use egui_extras::install_image_loaders;
 use egui_overlay::EguiOverlay;
@@ -20,6 +21,14 @@ use crate::templates::{Element, Template};
 use crate::templates::CoreTemplate::GenericText;
 use crate::templates::generic::{TemplateGenericImage, TemplateGenericText};
 
+struct PromptData {
+    multiline: bool,
+    title: String,
+    //
+
+    value: String
+}
+
 pub struct OverlayData {
     manager: OverlayManager,
     server: Option<ServerInfo>,
@@ -32,7 +41,9 @@ pub struct OverlayData {
 
     elements: Vec<Element>,
 
-    registry: Registry
+    registry: Registry,
+
+    prompt_state: Option<PromptData>
 }
 
 enum UIState {
@@ -128,22 +139,27 @@ impl OverlayData {
                     "actions": {
                        "STEAM_1:0:49243767": [
                             {
-                                "label": "Kill Player",
-                                "command": "sm_slay #STEAM_1_0_49243767"
-                            },
-                            {
                                 "label": "Kick Player",
                                 "command": "sm_kick #23"
+                            },
+                                                        {
+                                "label": "Slay Player",
+                                "command": "sm_slay #23"
                             }
                         ]
                     }
                 })),
-                registry.try_temp("overlay:list_players", json!({ "invalid": true })),
-                registry.try_temp("overlay:invalid_test", Value::Null),
-                registry.try_temp("overlay:generic_text", json!({ "content": "Hello"})),
-                registry.try_temp("overlay:generic_image", json!({ "url": "https://cdn.jackz.me/img/steve.jpg" }))
+                // registry.try_temp("overlay:list_players", json!({ "invalid": true })),
+                // registry.try_temp("overlay:invalid_test", Value::Null),
+                // registry.try_temp("overlay:generic_text", json!({ "content": "Hello"})),
+                // registry.try_temp("overlay:generic_image", json!({ "url": "https://cdn.jackz.me/img/steve.jpg" }))
 
             ],
+            prompt_state: Some(PromptData {
+                multiline: false,
+                title: "Enter name:".to_string(),
+                value: "".to_string(),
+            }),
             registry
         }
     }
@@ -211,13 +227,33 @@ impl EguiOverlay for OverlayData {
             }
         }
 
+        if let Some(prompt) = &mut self.prompt_state {
+            egui::Window::new(&prompt.title).id("prompt_text".into()).show(egui_context, |ui| {
+                ui.style_mut().spacing.item_spacing = vec2(14.0, 14.0);
+                ui.style_mut().spacing.button_padding = vec2(13.0, 7.0);
+                ui.add_sized(vec2(ui.available_width(), 17.0),
+                             TextEdit::singleline(&mut prompt.value)
+                                 .desired_rows(1)
+                                 .hint_text("Enter text here"));
+                ui.horizontal(|ui| {
+                    // TODO: somehow dynamically set up prompt _and_ feed it back to what needs it
+                    Button::new("Submit").fill(Color32::LIGHT_BLUE).ui(ui);
+                    ui.button("Cancel");
+                })
+            });
+        }
+
+
         for elem in &mut self.elements {
             egui::Window::new(elem.template.id())
                 .id(elem.id.to_string().into())
+                .default_pos(pos2(1600.0, 400.0))
                 .show(egui_context, |ui| {
                     ui.group(|ui| {
                         ui.label(format!("ID: {}", elem.id));
                         ui.label(format!("TemplateId: {}", elem.template.id()));
+                        let pos = ui.next_widget_position();
+                        ui.label(format!("Pos: ({}, {})", pos.x, pos.y));
                         ui.collapsing("State", |ui| {
                             ui.label(elem.state.to_string());
 

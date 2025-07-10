@@ -1,10 +1,12 @@
 use std::collections::HashMap;
 use egui::{Align, CollapsingHeader, Layout, Margin, RichText, Window};
+use egui::ImageSource::Uri;
 use egui::scroll_area::State;
 use egui_overlay::egui_render_three_d::three_d::Context;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use serde_json::Value::Null;
+use steamid_ng::SteamID;
 use tracing::debug;
 use tracing::log::warn;
 use crate::defs::{ServerInfo, TeamShow};
@@ -40,7 +42,17 @@ impl Template for TemplateListPlayers {
                             // FIXME: header part not clickable, abandon or custom hack?
                             egui::collapsing_header::CollapsingState::load_with_default_open(ui.ctx(), id, false)
                                 .show_header(ui, |ui| {
-                                    ui.label(&player.label_name());
+                                    ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
+                                        ui.style_mut().spacing.item_spacing = egui::vec2(4.0, 8.0);
+                                        if player.steamid.starts_with("STEAM") {
+                                            ui.image(Uri(format!("https://admin.jackz.me/api/users/{}/avatar", player.steamid).into()));
+                                        }
+                                        ui.strong(&player.label_name());
+                                    });
+                                    // ui.horizontal(|ui| {
+                                    //     ui.image(Uri(format!("https://admin.jackz.me/api/users/{}/avatar", player.steamid).into()));
+                                    //     ui.strong(&player.label_name());
+                                    // });
                                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                                         ui.label(RichText::new(&player.steamid).monospace());
                                     });
@@ -49,7 +61,11 @@ impl Template for TemplateListPlayers {
                                     ui.style_mut().spacing.item_spacing = egui::vec2(16.0, 12.0);
                                     ui.columns(2, |cols| {
                                         cols[0].label("SteamID");
-                                        cols[1].label(&player.steamid);
+                                        if let Ok(steamid) = SteamID::from_steam2(&player.steamid) {
+                                            cols[1].hyperlink_to(&player.steamid, format!("https://steamcommunity.com/profiles/{}", steamid.steam64()));
+                                        } else {
+                                            cols[1].label(&player.steamid);
+                                        }
 
                                         cols[0].label("Team");
                                         cols[1].label(&team.name);
@@ -62,9 +78,14 @@ impl Template for TemplateListPlayers {
 
                                         cols[0].label("Joined");
                                         cols[1].label(format!("{}s ago", player.connected.elapsed().unwrap().as_secs()));
+
                                     });
+                                    if player.steamid.starts_with("STEAM") {
+                                        ui.hyperlink_to("Open admin panel profile", format!("https://admin.jackz.me/admin/players/{}/overview/profile", player.steamid));
+                                    }
                                     ui.add_space(8.0);
                                     ui.horizontal(|ui| {
+                                        // TODO: button to open another element with overlay:player_details
                                         if let Some(actions) = state["actions"][&player.steamid].as_array(){
                                             for action in actions {
                                                 let name = action["label"].as_str().unwrap_or("?");
