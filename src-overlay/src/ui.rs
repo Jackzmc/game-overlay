@@ -1,9 +1,10 @@
+use std::cmp::PartialEq;
 use std::fmt::Display;
 use std::net::SocketAddr;
 use std::ops::Sub;
 use std::str::FromStr;
 use std::time::{Duration, Instant, SystemTime};
-use egui::{pos2, vec2, Align2, Button, Color32, FontId, TextEdit, TextFormat, Theme, Widget};
+use egui::{pos2, vec2, Align2, Button, Color32, FontId, Frame, Key, KeyboardShortcut, Modifiers, Order, Stroke, TextEdit, TextFormat, Theme, Widget, Window};
 use egui::ImageSource::Uri;
 use egui::text::LayoutJob;
 use egui_extras::install_image_loaders;
@@ -12,6 +13,8 @@ use egui_overlay::egui_render_three_d::ThreeDBackend as DefaultGfxBackend;
 use overlay_manager::ClientIncomingRequest;
 use serde_json::{json, Value};
 use tokio::sync::broadcast::Receiver;
+use tracing::debug;
+use tracing::log::trace;
 pub(crate) use crate::defs::{PlayerInfo, PlayerTeam, ServerInfo};
 use crate::defs::{TeamConfig, TeamShow};
 use crate::manager::OverlayManager;
@@ -46,6 +49,7 @@ pub struct OverlayData {
     prompt_state: Option<PromptData>
 }
 
+#[derive(PartialEq)]
 enum UIState {
     /// Game not active, UI not running
     Inactive,
@@ -165,7 +169,6 @@ impl OverlayData {
     }
 }
 
-
 impl EguiOverlay for OverlayData {
     fn gui_run(
         &mut self,
@@ -178,6 +181,32 @@ impl EguiOverlay for OverlayData {
             self.initialized = true;
             glfw_backend.set_window_size([2560.0, 1440.0]);
             install_image_loaders(egui_context);
+        }
+
+        let toggle_shortcut = KeyboardShortcut::new(Modifiers::CTRL, Key::Home);
+
+        egui_context.input_mut(|mut input| {
+            if input.consume_shortcut(&toggle_shortcut) {
+                debug!("CTRL+HOME pressed, switching state");
+                if self.ui_state == UIState::DetailActive {
+                    self.ui_state = UIState::Active;
+                    trace!("state set to normal active");
+                } else {
+                    self.ui_state = UIState::DetailActive;
+                    trace!("state set to detail active");
+                }
+            }
+        });
+
+        if self.ui_state == UIState::DetailActive {
+            Window::new("bg").resizable(false).movable(false).title_bar(false).interactable(true).collapsible(false).order(Order::Background)
+                .frame(Frame::none().fill(Color32::from_rgba_unmultiplied(220, 220, 220, 20)))
+                // .default_pos(pos2(0.0,0.0)).fixed_size(vec2(2560.0, 1440.0))
+                .fixed_rect(egui_context.screen_rect())
+                .show(egui_context, |ui| {
+                    // ui.style_mut().visuals.window_fill = Color32::from_rgba_unmultiplied(220, 220, 220, 20);
+                    ui.allocate_space(ui.available_size());
+                });
         }
         /// Process incoming payloads and pass to manager
         /* TODO:
@@ -199,6 +228,7 @@ impl EguiOverlay for OverlayData {
 
          */
 
+
         if let Some(startup_msg_time) = self.startup_message_remain {
             egui::Window::new("welcome_message")
                 // .default_pos(egui::pos2(200.0, 400.0))
@@ -208,6 +238,7 @@ impl EguiOverlay for OverlayData {
                 .fade_out(true)
                 .collapsible(false)
                 .resizable(false)
+                .order(Order::Foreground)
                 .show(egui_context, |ui| {
                     let mut job = LayoutJob::default();
                     job.append(
@@ -288,9 +319,11 @@ impl EguiOverlay for OverlayData {
                 });
             });
 
-        let needs_controls = egui_context.wants_pointer_input() || egui_context.wants_keyboard_input();
-        glfw_backend.set_passthrough(!needs_controls);
-
+        if self.ui_state == UIState::DetailActive {
+            glfw_backend.set_passthrough(false);
+        } else {
+            glfw_backend.set_passthrough(!egui_context.wants_pointer_input() && !egui_context.wants_keyboard_input());
+        }
         // egui_context.request_repaint();
     }
 }
