@@ -4,7 +4,7 @@ use std::net::SocketAddr;
 use std::ops::Sub;
 use std::str::FromStr;
 use std::time::{Duration, Instant, SystemTime};
-use egui::{pos2, vec2, Align2, Button, Color32, FontId, Frame, Key, KeyboardShortcut, Modifiers, Order, Stroke, TextEdit, TextFormat, Theme, Widget, Window};
+use egui::{pos2, vec2, Align, Align2, Button, Color32, FontId, Frame, Key, KeyboardShortcut, Layout, Modifiers, Order, Stroke, TextEdit, TextFormat, Theme, Widget, Window};
 use egui::ImageSource::Uri;
 use egui::text::LayoutJob;
 use egui_extras::install_image_loaders;
@@ -174,7 +174,7 @@ impl EguiOverlay for OverlayData {
         &mut self,
         egui_context: &egui::Context,
         _default_gfx_backend: &mut DefaultGfxBackend,
-        glfw_backend: &mut egui_window_glfw_passthrough::GlfwBackend,
+        glfw_backend: &mut egui_overlay::egui_window_glfw_passthrough::GlfwBackend,
     ) {
         egui_context.set_theme(Theme::Light);
         if !self.initialized {
@@ -185,6 +185,7 @@ impl EguiOverlay for OverlayData {
 
         let toggle_shortcut = KeyboardShortcut::new(Modifiers::CTRL, Key::Home);
 
+        // TODO: own function, or struct? (struct for keyboardshortcut)
         egui_context.input_mut(|mut input| {
             if input.consume_shortcut(&toggle_shortcut) {
                 debug!("CTRL+HOME pressed, switching state");
@@ -199,6 +200,7 @@ impl EguiOverlay for OverlayData {
         });
 
         if self.ui_state == UIState::DetailActive {
+            // TODO: own struct ?
             Window::new("bg").resizable(false).movable(false).title_bar(false).interactable(true).collapsible(false).order(Order::Background)
                 .frame(Frame::none().fill(Color32::from_rgba_unmultiplied(220, 220, 220, 20)))
                 // .default_pos(pos2(0.0,0.0)).fixed_size(vec2(2560.0, 1440.0))
@@ -208,6 +210,35 @@ impl EguiOverlay for OverlayData {
                     ui.allocate_space(ui.available_size());
                 });
         }
+            // TODO: own struct
+            Window::new("topbar").resizable(false).movable(false).title_bar(false).interactable(true).collapsible(false).order(Order::Foreground)
+                .frame(Frame::none().fill(Color32::from_rgba_unmultiplied(20, 20, 20, 255)))
+                .fixed_pos(pos2(0.0, 0.0))
+                .fixed_size(vec2(egui_context.screen_rect().width(), 40.0))
+                .show(egui_context, |ui| {
+                    // ui.style_mut().visuals.window_fill = Color32::from_rgba_unmultiplied(220, 220, 220, 20);
+                    // ui.horizontal(|ui| {
+                    //
+                    //     ui.allocate_space(ui.available_size());
+                    // });
+                    ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
+                        ui.button("Overlay");
+                        if ui.button("About").clicked() {
+                            // TODO: own struct
+//                             egui::Modal::new("about".into()).show(ui.ctx(), |ui| {
+//                                 // TODO: state to keep open
+//                                 ui.label("Mothers! Women!\n
+// When the years pass by and the wounds of war are stanched; when the memory of the sad and bloody days dissipates in a present of liberty, of peace and of wellbeing; when the rancor have died out and pride in a free country is felt equally by all Spaniards, speak to your children. Tell them of these men of the International Brigades.\n\
+// \n\
+// Recount for them how, coming over seas and mountains, crossing frontiers bristling with bayonets, sought by raving dogs thirsting to tear their flesh, these men reached our country as crusaders for freedom, to fight and die for Spain’s liberty and independence threatened by German and Italian fascism. \
+// They gave up everything — their loves, their countries, home and fortune, fathers, mothers, wives, brothers, sisters and children — and they came and said to us: “We are here. Your cause, Spain’s cause, is ours. It is the cause of all advanced and progressive mankind.”\n\
+// \n\
+// - Dolores Ibárruri, 1938");
+//                             });
+                        }
+                    });
+                });
+        // }
         /// Process incoming payloads and pass to manager
         /* TODO:
             read thread sends to manager directly, manager has its own queue
@@ -228,7 +259,7 @@ impl EguiOverlay for OverlayData {
 
          */
 
-
+        // TODO: own struct
         if let Some(startup_msg_time) = self.startup_message_remain {
             egui::Window::new("welcome_message")
                 // .default_pos(egui::pos2(200.0, 400.0))
