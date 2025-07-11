@@ -1,19 +1,24 @@
 use std::cmp::PartialEq;
+use std::collections::HashMap;
 use std::fmt::Display;
+use std::fs::{read_to_string, File};
+use std::io::{ErrorKind, Write};
 use std::net::SocketAddr;
 use std::ops::Sub;
 use std::str::FromStr;
 use std::time::{Duration, Instant, SystemTime};
-use egui::{pos2, vec2, Align, Align2, Button, Color32, FontId, Frame, Key, KeyboardShortcut, Layout, Modifiers, Order, Stroke, TextEdit, TextFormat, Theme, Widget, Window};
+use directories_next::ProjectDirs;
+use egui::{pos2, vec2, Align, Align2, Button, Color32, FontId, Frame, Id, InputState, Key, KeyboardShortcut, Layout, Margin, MenuBar, Modal, Modifiers, Order, Response, ScrollArea, Stroke, TextEdit, TextFormat, Theme, Ui, Widget, Window};
 use egui::ImageSource::Uri;
 use egui::text::LayoutJob;
-use egui_extras::install_image_loaders;
+use egui_extras::{install_image_loaders, Column, TableBuilder};
 use egui_overlay::EguiOverlay;
 use egui_overlay::egui_render_three_d::ThreeDBackend as DefaultGfxBackend;
 use overlay_manager::ClientIncomingRequest;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tokio::sync::broadcast::Receiver;
-use tracing::debug;
+use tracing::{debug, info};
 use tracing::log::trace;
 pub(crate) use crate::defs::{PlayerInfo, PlayerTeam, ServerInfo};
 use crate::defs::{TeamConfig, TeamShow};
@@ -46,7 +51,57 @@ pub struct OverlayData {
 
     registry: Registry,
 
-    prompt_state: Option<PromptData>
+    prompt_state: Option<PromptData>,
+
+    shortcuts: ShortcutContainer,
+
+    startup_msg: StartupMessage,
+
+    store: OverlayStorage
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+/// Holds all data that gets saved between restarts
+pub struct OverlayStorage {
+    /// Maps server ips to a list of namespace:elem_id
+    approved_elems_ids: HashMap<SocketAddr, Vec<String>> // TODO: replace SocketAddr with uuid of server from manager?
+}
+impl Default for OverlayStorage {
+    fn default() -> Self {
+        Self {
+            approved_elems_ids: HashMap::new()
+        }
+    }
+}
+impl OverlayStorage {
+    pub fn save(&mut self) -> Result<(), String> {
+        let paths = ProjectDirs::from("me.jackz", "jackzmc", "gameoverlay")
+            .ok_or("Could not find save location".to_string())?;
+        let save_path = paths.data_dir().join("state.json");
+        info!("Save to {:?}", save_path);
+        let mut file = File::create(save_path).map_err(|err| err.to_string())?;
+        file.write_all(serde_json::to_string_pretty(self).unwrap().as_bytes()).map_err(|err| err.to_string())?;
+        Ok(())
+    }
+
+    pub fn load() -> Result<OverlayStorage, String> {
+        let paths = ProjectDirs::from("me.jackz", "jackzmc", "gameoverlay")
+            .ok_or("Could not find save location".to_string())?;
+        let save_path = paths.data_dir().join("state.json");
+        info!("Load from {:?}", save_path);
+        match read_to_string(save_path) {
+            Ok(content) => {
+                serde_json::from_str(&content).map_err(|err| err.to_string())
+            },
+            Err(e) => {
+                // File doesn't exist, give a default state one
+                if e.kind() == ErrorKind::NotFound {
+                    return Ok(OverlayStorage::default())
+                }
+                Err(e.to_string())
+            }
+        }
+    }
 }
 
 #[derive(PartialEq)]
@@ -67,6 +122,7 @@ impl OverlayData {
         registry.register("overlay:generic_image", TemplateGenericImage);
 
         OverlayData {
+            store: OverlayStorage::load().unwrap(),
             manager,
             server: Some(ServerInfo {
                 name: "My Server".to_string(),
@@ -164,7 +220,74 @@ impl OverlayData {
                 title: "Enter name:".to_string(),
                 value: "".to_string(),
             }),
+            startup_msg: StartupMessage::new(),
+            shortcuts: ShortcutContainer {
+                toggle: KeyboardShortcut::new(Modifiers::CTRL, Key::Home)
+            },
             registry
+        }
+    }
+
+    pub fn run_inputs(&mut self, input: &mut InputState) {
+        if input.consume_shortcut(&self.shortcuts.toggle) {
+            debug!("CTRL+HOME pressed, switching state");
+            if self.ui_state == UIState::DetailActive {
+                self.ui_state = UIState::Active;
+                trace!("state set to normal active");
+            } else {
+                self.ui_state = UIState::DetailActive;
+                trace!("state set to detail active");
+            }
+        }
+    }
+}
+
+struct ShortcutContainer {
+    toggle: KeyboardShortcut
+}
+
+struct StartupMessage {
+    remaining_time: Option<Instant>
+}
+
+trait UIElement {
+    fn run_ui(&mut self, ctx: &egui::Context);
+}
+impl StartupMessage {
+    pub fn new() -> Self { Self { remaining_time: Some(Instant::now()) } }
+}
+impl UIElement for StartupMessage {
+    fn run_ui(&mut self, ctx: &egui::Context) {
+        if let Some(startup_msg_time) = self.remaining_time {
+            Window::new("welcome_message")
+                // .default_pos(egui::pos2(200.0, 400.0))
+                .anchor(Align2::RIGHT_TOP, egui::vec2(-15.0, 15.0))
+                .title_bar(false)
+                .fade_in(true)
+                .fade_out(true)
+                .collapsible(false)
+                .resizable(false)
+                .order(Order::Foreground)
+                .show(ctx, |ui| {
+                    let mut job = LayoutJob::default();
+                    job.append(
+                        "Overlay active",
+                        0.0,
+                        TextFormat::simple(FontId::default(), Color32::BLACK)
+                    );
+                    ui.label(job);
+                    ui.label("Connect to a supported server to use the overlay");
+
+                    ui.add_space(14.0);
+                    let mut job = LayoutJob::default();
+                    job.append("Open the overlay with ", 0.0, TextFormat::simple(FontId::default(), Color32::BLACK));
+                    job.append("CTRL + HOME", 0.0, TextFormat::simple(FontId::monospace(12.0), Color32::BLACK));
+                    ui.label(job);
+                });
+            // End the message
+            if startup_msg_time.elapsed().as_secs() > 8 {
+                self.remaining_time = None;
+            }
         }
     }
 }
@@ -176,69 +299,63 @@ impl EguiOverlay for OverlayData {
         _default_gfx_backend: &mut DefaultGfxBackend,
         glfw_backend: &mut egui_overlay::egui_window_glfw_passthrough::GlfwBackend,
     ) {
-        egui_context.set_theme(Theme::Light);
         if !self.initialized {
             self.initialized = true;
             glfw_backend.set_window_size([2560.0, 1440.0]);
             install_image_loaders(egui_context);
+            egui_context.set_theme(Theme::Light);
         }
 
-        let toggle_shortcut = KeyboardShortcut::new(Modifiers::CTRL, Key::Home);
+        egui_context.input_mut(|input| { self.run_inputs(input) });
 
-        // TODO: own function, or struct? (struct for keyboardshortcut)
-        egui_context.input_mut(|mut input| {
-            if input.consume_shortcut(&toggle_shortcut) {
-                debug!("CTRL+HOME pressed, switching state");
-                if self.ui_state == UIState::DetailActive {
-                    self.ui_state = UIState::Active;
-                    trace!("state set to normal active");
-                } else {
-                    self.ui_state = UIState::DetailActive;
-                    trace!("state set to detail active");
-                }
-            }
-        });
 
         if self.ui_state == UIState::DetailActive {
             // TODO: own struct ?
             Window::new("bg").resizable(false).movable(false).title_bar(false).interactable(true).collapsible(false).order(Order::Background)
-                .frame(Frame::none().fill(Color32::from_rgba_unmultiplied(220, 220, 220, 20)))
+                .frame(Frame::new().fill(Color32::from_rgba_unmultiplied(220, 220, 220, 20)))
                 // .default_pos(pos2(0.0,0.0)).fixed_size(vec2(2560.0, 1440.0))
                 .fixed_rect(egui_context.screen_rect())
                 .show(egui_context, |ui| {
                     // ui.style_mut().visuals.window_fill = Color32::from_rgba_unmultiplied(220, 220, 220, 20);
                     ui.allocate_space(ui.available_size());
                 });
-        }
             // TODO: own struct
             Window::new("topbar").resizable(false).movable(false).title_bar(false).interactable(true).collapsible(false).order(Order::Foreground)
-                .frame(Frame::none().fill(Color32::from_rgba_unmultiplied(20, 20, 20, 255)))
+                .frame(Frame::new().fill(Color32::from_rgba_unmultiplied(20, 20, 20, 255)).inner_margin(Margin::same(10)))
                 .fixed_pos(pos2(0.0, 0.0))
-                .fixed_size(vec2(egui_context.screen_rect().width(), 40.0))
+                .fixed_size(vec2(egui_context.screen_rect().width(), 80.0))
                 .show(egui_context, |ui| {
-                    // ui.style_mut().visuals.window_fill = Color32::from_rgba_unmultiplied(220, 220, 220, 20);
+                    ui.style_mut().spacing.item_spacing = egui::vec2(14.0, 14.0);
+                    ui.style_mut().spacing.interact_size = egui::vec2(16.0, 16.0);
+                    ui.style_mut().spacing.button_padding = vec2(13.0, 7.0);
                     // ui.horizontal(|ui| {
                     //
-                    //     ui.allocate_space(ui.available_size());
                     // });
-                    ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
-                        ui.button("Overlay");
-                        if ui.button("About").clicked() {
-                            // TODO: own struct
-//                             egui::Modal::new("about".into()).show(ui.ctx(), |ui| {
-//                                 // TODO: state to keep open
-//                                 ui.label("Mothers! Women!\n
-// When the years pass by and the wounds of war are stanched; when the memory of the sad and bloody days dissipates in a present of liberty, of peace and of wellbeing; when the rancor have died out and pride in a free country is felt equally by all Spaniards, speak to your children. Tell them of these men of the International Brigades.\n\
-// \n\
-// Recount for them how, coming over seas and mountains, crossing frontiers bristling with bayonets, sought by raving dogs thirsting to tear their flesh, these men reached our country as crusaders for freedom, to fight and die for Spain’s liberty and independence threatened by German and Italian fascism. \
-// They gave up everything — their loves, their countries, home and fortune, fathers, mothers, wives, brothers, sisters and children — and they came and said to us: “We are here. Your cause, Spain’s cause, is ours. It is the cause of all advanced and progressive mankind.”\n\
-// \n\
-// - Dolores Ibárruri, 1938");
-//                             });
-                        }
+                    MenuBar::new().ui(ui, |ui| {
+                        // ui.style_mut().visuals
+                       ui.menu_button("Overlay", |ui| {
+                           ui.label("?");
+                       });
+                        ui.button("About");
                     });
+//                     ui.with_layout(Layout::left_to_right(Align::TOP), |ui| {
+//                         ui.button("Overlay");
+//                         if ui.button("About").clicked() {
+//                             // TODO: own struct
+// //                             egui::Modal::new("about".into()).show(ui.ctx(), |ui| {
+// //                                 // TODO: state to keep open
+// //                                 ui.label("Mothers! Women!\n
+// // When the years pass by and the wounds of war are stanched; when the memory of the sad and bloody days dissipates in a present of liberty, of peace and of wellbeing; when the rancor have died out and pride in a free country is felt equally by all Spaniards, speak to your children. Tell them of these men of the International Brigades.\n\
+// // \n\
+// // Recount for them how, coming over seas and mountains, crossing frontiers bristling with bayonets, sought by raving dogs thirsting to tear their flesh, these men reached our country as crusaders for freedom, to fight and die for Spain’s liberty and independence threatened by German and Italian fascism. \
+// // They gave up everything — their loves, their countries, home and fortune, fathers, mothers, wives, brothers, sisters and children — and they came and said to us: “We are here. Your cause, Spain’s cause, is ours. It is the cause of all advanced and progressive mankind.”\n\
+// // \n\
+// // - Dolores Ibárruri, 1938");
+// //                             });
+//                         }
+//                     });
                 });
-        // }
+        }
         /// Process incoming payloads and pass to manager
         /* TODO:
             read thread sends to manager directly, manager has its own queue
@@ -259,76 +376,73 @@ impl EguiOverlay for OverlayData {
 
          */
 
-        // TODO: own struct
-        if let Some(startup_msg_time) = self.startup_message_remain {
-            egui::Window::new("welcome_message")
-                // .default_pos(egui::pos2(200.0, 400.0))
-                .anchor(Align2::RIGHT_TOP, egui::vec2(-15.0, 15.0))
-                .title_bar(false)
-                .fade_in(true)
-                .fade_out(true)
-                .collapsible(false)
-                .resizable(false)
-                .order(Order::Foreground)
-                .show(egui_context, |ui| {
-                    let mut job = LayoutJob::default();
-                    job.append(
-                        "Overlay active",
-                        0.0,
-                        TextFormat::simple(FontId::default(), Color32::BLACK)
-                    );
-                    ui.label(job);
-                    ui.label("Connect to a supported server to use the overlay");
+        self.startup_msg.run_ui(egui_context);
 
-                    ui.add_space(14.0);
-                    ui.label("Open the overlay with CTRL + HOME");
-                });
-            // End the message
-            if startup_msg_time.elapsed().as_secs() > 8 {
-                self.startup_message_remain = None;
+        // if let Some(prompt) = &mut self.prompt_state {
+        //     Modal::new("prompt_text".into()).show(egui_context, |ui| {
+        //         ui.style_mut().spacing.item_spacing = vec2(14.0, 14.0);
+        //         ui.style_mut().spacing.button_padding = vec2(13.0, 7.0);
+        //         ui.strong(&prompt.title);
+        //         ui.add_sized(vec2(ui.available_width(), 17.0),
+        //            TextEdit::singleline(&mut prompt.value)
+        //              .desired_rows(1)
+        //              .hint_text("Enter text here"));
+        //         ui.horizontal(|ui| {
+        //             // TODO: somehow dynamically set up prompt _and_ feed it back to what needs it
+        //             Button::new("Submit").fill(Color32::LIGHT_BLUE).ui(ui);
+        //             ui.button("Cancel");
+        //         })
+        //     });
+        // }
+
+        if let Some(server) = &self.server {
+            for elem in &mut self.elements {
+                elem.show(egui_context, server);
             }
         }
 
-        if let Some(prompt) = &mut self.prompt_state {
-            egui::Window::new(&prompt.title).id("prompt_text".into()).show(egui_context, |ui| {
-                ui.style_mut().spacing.item_spacing = vec2(14.0, 14.0);
-                ui.style_mut().spacing.button_padding = vec2(13.0, 7.0);
-                ui.add_sized(vec2(ui.available_width(), 17.0),
-                             TextEdit::singleline(&mut prompt.value)
-                                 .desired_rows(1)
-                                 .hint_text("Enter text here"));
-                ui.horizontal(|ui| {
-                    // TODO: somehow dynamically set up prompt _and_ feed it back to what needs it
-                    Button::new("Submit").fill(Color32::LIGHT_BLUE).ui(ui);
-                    ui.button("Cancel");
-                })
-            });
-        }
-
-
-        for elem in &mut self.elements {
-            egui::Window::new(elem.template.id())
-                .id(elem.id.to_string().into())
-                .default_pos(pos2(1600.0, 400.0))
-                .show(egui_context, |ui| {
-                    ui.group(|ui| {
-                        ui.label(format!("ID: {}", elem.id));
-                        ui.label(format!("TemplateId: {}", elem.template.id()));
-                        let pos = ui.next_widget_position();
-                        ui.label(format!("Pos: ({}, {})", pos.x, pos.y));
-                        ui.collapsing("State", |ui| {
-                            ui.label(elem.state.to_string());
-
-                        })
+        Window::new("Main Window").show(egui_context, |ui| {
+            ui.style_mut().spacing.item_spacing = egui::vec2(16.0, 14.0);
+            ui.style_mut().spacing.window_margin = Margin::same(10);
+            ui.strong("Elements");
+            ScrollArea::vertical().show(ui, |ui| {
+                TableBuilder::new(ui)
+                    .columns(Column::auto(), 3)
+                    .body(|mut ui| {
+                        for i in 0..3 {
+                            // ui.horizontal(|ui| {
+                            //     ui.strong("Custom Element 1");
+                            //     ui.checkbox(&mut false, "");
+                            //     ui.label(format!("Element {i}"));
+                            // });
+                            ui.row(20.0, |mut ui| {
+                                ui.col(|col| {
+                                    col.checkbox(&mut false, "");
+                                });
+                                ui.col(|col| {
+                                    col.strong("Custom Element Name");
+                                });
+                                ui.col(|col| {
+                                    col.label("overlay:custom_elem");
+                                });
+                            })
+                        }
                     });
-                    if let Err(err) = elem.template.is_state_valid(&elem.state) {
-                        ui.colored_label(Color32::RED, format!("This element has been misconfigured.\nError: {}", err));
-                    } else {
-                        // No issues, render
-                        elem.template.render(ui, self.server.as_ref().unwrap(), &mut elem.state);
-                    }
-                });
-        }
+
+
+            });
+            // ui.horizontal_top(|ui| {
+            //     if ui.button("tab 1").clicked() {
+            //         ui.memory_mut(|m| m.data.insert_temp(id, 1))
+            //     } else if ui.button("tab2").clicked() {
+            //         ui.memory_mut(|m| m.data.insert_temp(id, 2))
+            //     }
+            //
+            // });
+            // let tab: Option<u8> = ui.memory(|mem| mem.data.get_temp(id));
+            // ui.label(format!("Tab: {:?}", tab));
+        });
+
 
         egui::Window::new("Dummy Player")
             .default_open(false)

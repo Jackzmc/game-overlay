@@ -5,6 +5,7 @@ use crate::templates::{Element, ElementState, Template, TemplateId, TemplateInst
 
 pub struct Registry {
     templates: HashMap<String, TemplateInstance>,
+    // approved_elems: HashMap<SocketAddr, Vec<String>>
 }
 
 impl Registry {
