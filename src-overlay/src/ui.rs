@@ -47,7 +47,8 @@ pub struct OverlayData {
 
     read_rx: Receiver<ClientIncomingRequest>,
 
-    elements: Vec<Element>,
+    /// Key is element ID
+    elements: HashMap<String, Element>,
 
     registry: Registry,
 
@@ -136,6 +137,7 @@ impl OverlayData {
     // server sends element, we get entry to see if approved
     // if approved in past, spawn it
     pub fn request_elem(&mut self, template_id: &str, id: &str, state: ElementState) -> Result<bool, String> {
+        debug!("request_elem template={} id={}", template_id, id);
         if !self.registry.has(template_id) {
             return Err("Template not registered".to_string())
         }
@@ -151,18 +153,25 @@ impl OverlayData {
                 template_id: template_id.to_string(),
                 state: Some(state),
             });
-        if &entry.template_id != id {
+        if &entry.template_id != template_id {
             // TODO: just drop prev entry and require re-approval
-            return Err("Requested template does not match registered template".to_string());
+            return Err(format!("Requested template ({}) does not match registered template ({})", template_id, entry.template_id));
         }
         // finally, if approved then initialize it
-        if entry.enabled {
-            let state = entry.state.take().unwrap_or(json!({}));
-            // TODO: check element doesn't exist? , instead of vec, hashmap?
-            self.elements.push(self.registry.named(template_id, id.to_string(), state).unwrap());
-            // spawn in
+        let enabled = entry.enabled;
+        if enabled {
+            let state = entry.state.take();
+            self.spawn_elem(template_id, id.to_string(), state)
         }
-        Ok(entry.enabled)
+        Ok(enabled)
+    }
+
+    /// Spawns an element (that is shown)
+    pub fn spawn_elem(&mut self, template_id: &str, id: String, state: Option<ElementState>) {
+        let state = state.unwrap_or(json!({}));
+        // TODO: check element doesn't exist? , instead of vec, hashmap?
+        self.elements.insert(id.to_string(), self.registry.named(template_id, id.to_string(), state).unwrap());
+        debug!("spawn_elem template={} id={}", template_id, id);
     }
 
     /// Marks an element id as approved or unapproved
@@ -173,10 +182,14 @@ impl OverlayData {
             let list = self.store.approved_elems(server.ip_addr.clone());
             let entry = list.get_mut(id).expect("request_elem not called before set_elem_approval; no entry");
             entry.enabled = value;
+            debug!("set_elem_approval id={} value={}", id, value);
         }
     }
     pub fn server(&self) -> Option<&ServerInfo> {
         self.server.as_ref()
+    }
+    pub fn server_id(&self) -> Option<SocketAddr> {
+        self.server.as_ref().map(|server| server.ip_addr.clone())
     }
     pub fn example(manager: OverlayManager, rx: Receiver<ClientIncomingRequest>) -> Self {
         let mut registry = Registry::new();
@@ -187,7 +200,7 @@ impl OverlayData {
 
         registry.named("template:blah", "my_elem", Default::default());
 
-        OverlayData {
+        let mut s = OverlayData {
             store: OverlayStorage::load().unwrap(),
             manager,
             server: Some(ServerInfo {
@@ -260,27 +273,7 @@ impl OverlayData {
             startup_message_remain: Some(Instant::now()),
             ui_state: UIState::Inactive,
             read_rx: rx,
-            elements: vec![
-                registry.try_temp("overlay:list_players", json!({
-                    "actions": {
-                       "STEAM_1:0:49243767": [
-                            {
-                                "label": "Kick Player",
-                                "command": "sm_kick #23"
-                            },
-                                                        {
-                                "label": "Slay Player",
-                                "command": "sm_slay #23"
-                            }
-                        ]
-                    }
-                })),
-                // registry.try_temp("overlay:list_players", json!({ "invalid": true })),
-                // registry.try_temp("overlay:invalid_test", Value::Null),
-                // registry.try_temp("overlay:generic_text", json!({ "content": "Hello"})),
-                // registry.try_temp("overlay:generic_image", json!({ "url": "https://cdn.jackz.me/img/steve.jpg" }))
-
-            ],
+            elements: HashMap::new(),
             prompt_state: Some(PromptData {
                 multiline: false,
                 title: "Enter name:".to_string(),
@@ -291,7 +284,37 @@ impl OverlayData {
                 toggle: KeyboardShortcut::new(Modifiers::CTRL, Key::Home)
             },
             registry
-        }
+        };
+        //registry.try_temp("overlay:list_players", json!({
+        //                     "actions": {
+        //                        "STEAM_1:0:49243767": [
+        //                             {
+        //                                 "label": "Kick Player",
+        //                                 "command": "sm_kick #23"
+        //                             },
+        //                                                         {
+        //                                 "label": "Slay Player",
+        //                                 "command": "sm_slay #23"
+        //                             }
+        //                         ]
+        //                     }
+        //                 })),
+        s.request_elem("overlay:list_players", "list_players_test",
+       json!({
+            "actions": {
+               "STEAM_1:0:49243767": [
+                    {
+                        "label": "Kick Player",
+                        "command": "sm_kick #23"
+                    },
+                                                {
+                        "label": "Slay Player",
+                        "command": "sm_slay #23"
+                    }
+                ]
+            }
+        })).unwrap();
+        s
     }
 
     pub fn run_inputs(&mut self, input: &mut InputState) {
@@ -462,7 +485,7 @@ impl EguiOverlay for OverlayData {
         // }
 
         if let Some(server) = &self.server {
-            for elem in &mut self.elements {
+            for (elem_id, elem) in &mut self.elements {
                 elem.show(egui_context, server);
             }
         }
@@ -471,45 +494,48 @@ impl EguiOverlay for OverlayData {
             ui.style_mut().spacing.item_spacing = egui::vec2(16.0, 14.0);
             ui.style_mut().spacing.window_margin = Margin::same(10);
             ui.strong("Elements");
-            ScrollArea::vertical().show(ui, |ui| {
-                TableBuilder::new(ui)
-                    .columns(Column::auto(), 3)
-                    .body(|mut ui| {
-                        for i in 0..3 {
-                            // ui.horizontal(|ui| {
-                            //     ui.strong("Custom Element 1");
-                            //     ui.checkbox(&mut false, "");
-                            //     ui.label(format!("Element {i}"));
-                            // });
-                            ui.row(20.0, |mut ui| {
-                                ui.col(|col| {
-                                    if col.checkbox(&mut false, "").changed() {
-                                        // self.store.approved_elems_ids. ...
-                                        self.store.save();
-                                    };
-                                });
-                                ui.col(|col| {
-                                    col.strong("Custom Element Name");
-                                });
-                                ui.col(|col| {
-                                    col.label("overlay:custom_elem");
-                                });
-                            })
-                        }
-                    });
+            if let Some(server_id) = self.server_id() {
+                ScrollArea::vertical().show(ui, |ui| {
+                    TableBuilder::new(ui)
+                        .columns(Column::auto(), 3)
+                        .header(20.0, |mut row| {
+                            row.col(|col| {});
+                            row.col(|col| { col.strong("Element ID"); });
+                            row.col(|col| { col.strong("Template ID"); });
+                            // row.col(|col| { col.strong("")});
+                        })
+                        .body(|mut ui| {
+                            let mut to_enable = vec![];
+                            for (elem_id, entry) in self.store.approved_elems(server_id) {
+                                ui.row(20.0, |mut ui| {
+                                    ui.col(|col| {
+                                        if col.checkbox(&mut entry.enabled, "").changed() {
+                                            if entry.enabled {
+                                                // Can't re-use self here, so hack, throw in list and enable it later
+                                                to_enable.push((elem_id.to_string(), entry.template_id.to_string(), entry.state.take()));
+                                                // self.spawn_elem(&template_id, id, None);
+                                            }
+                                        };
+                                    });
+                                    ui.col(|col| {
+                                        col.strong(elem_id);
+                                    });
+                                    ui.col(|col| {
+                                        col.label(&entry.template_id);
+                                    });
+                                })
+                            }
+                            // Enable any entries that need to be enabled (hack)
+                            for l in to_enable {
+                                self.spawn_elem(&l.1, l.0, l.2);
+                            }
+                        });
 
 
-            });
-            // ui.horizontal_top(|ui| {
-            //     if ui.button("tab 1").clicked() {
-            //         ui.memory_mut(|m| m.data.insert_temp(id, 1))
-            //     } else if ui.button("tab2").clicked() {
-            //         ui.memory_mut(|m| m.data.insert_temp(id, 2))
-            //     }
-            //
-            // });
-            // let tab: Option<u8> = ui.memory(|mem| mem.data.get_temp(id));
-            // ui.label(format!("Tab: {:?}", tab));
+                });
+            } else {
+                ui.label("Not connected to server");
+            }
         });
 
 
