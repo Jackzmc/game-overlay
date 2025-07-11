@@ -25,7 +25,7 @@ use crate::defs::{TeamConfig, TeamShow};
 use crate::manager::OverlayManager;
 use crate::registry::Registry;
 use crate::templates::list_player::TemplateListPlayers;
-use crate::templates::{Element, Template};
+use crate::templates::{Element, ElementState, Template};
 use crate::templates::CoreTemplate::GenericText;
 use crate::templates::generic::{TemplateGenericImage, TemplateGenericText};
 
@@ -61,10 +61,24 @@ pub struct OverlayData {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+struct ApproveEntry {
+    /// Is this element enabled?
+    enabled: bool,
+
+    /// The template ID the requested elem has. Must match for requests
+    template_id: String,
+
+    #[serde(skip_serializing)]
+    #[serde(skip_deserializing)]
+    /// The state to use for a pending approval
+    state: Option<ElementState>
+}
+// TODO: need list of addon approval, when pending needs in memory the state
+#[derive(Debug, Serialize, Deserialize)]
 /// Holds all data that gets saved between restarts
 pub struct OverlayStorage {
     /// Maps server ips to a list of namespace:elem_id
-    approved_elems_ids: HashMap<SocketAddr, Vec<String>> // TODO: replace SocketAddr with uuid of server from manager?
+    approved_elems_ids: HashMap<SocketAddr, HashMap<String, ApproveEntry>> // TODO: replace SocketAddr with uuid of server from manager?
 }
 impl Default for OverlayStorage {
     fn default() -> Self {
@@ -102,6 +116,11 @@ impl OverlayStorage {
             }
         }
     }
+
+    /// Returns list of approved elem for server, or creates a new list if none
+    pub fn approved_elems(&mut self, ip_addr: SocketAddr) -> &mut HashMap<String, ApproveEntry> {
+        self.approved_elems_ids.entry(ip_addr).or_insert(HashMap::new())
+    }
 }
 
 #[derive(PartialEq)]
@@ -113,13 +132,60 @@ enum UIState {
     /// Detail view active, extra UI is shown
     DetailActive
 }
-
 impl OverlayData {
+    // server sends element, we get entry to see if approved
+    // if approved in past, spawn it
+    pub fn request_elem(&mut self, template_id: &str, id: &str, state: ElementState) -> Result<bool, String> {
+        if !self.registry.has(template_id) {
+            return Err("Template not registered".to_string())
+        }
+        if self.server.is_none() {
+            return Err("Not connected to any server".to_string())
+        }
+        let server = self.server.as_ref().unwrap();
+        // vec list is okay
+        // check if in list, if so, spawn here
+        let entry = self.store.approved_elems(server.ip_addr.clone()).entry(id.to_string())
+            .or_insert_with(|| ApproveEntry {
+                enabled: false,
+                template_id: template_id.to_string(),
+                state: Some(state),
+            });
+        if &entry.template_id != id {
+            // TODO: just drop prev entry and require re-approval
+            return Err("Requested template does not match registered template".to_string());
+        }
+        // finally, if approved then initialize it
+        if entry.enabled {
+            let state = entry.state.take().unwrap_or(json!({}));
+            // TODO: check element doesn't exist? , instead of vec, hashmap?
+            self.elements.push(self.registry.named(template_id, id.to_string(), state).unwrap());
+            // spawn in
+        }
+        Ok(entry.enabled)
+    }
+
+    /// Marks an element id as approved or unapproved
+    /// request_elem should be called at least once before this method is used
+    /// Will panic if element is not in list
+    pub fn set_elem_approval(&mut self, id: &str, value: bool) {
+        if let Some(server) = self.server() {
+            let list = self.store.approved_elems(server.ip_addr.clone());
+            let entry = list.get_mut(id).expect("request_elem not called before set_elem_approval; no entry");
+            entry.enabled = value;
+        }
+    }
+    pub fn server(&self) -> Option<&ServerInfo> {
+        self.server.as_ref()
+    }
     pub fn example(manager: OverlayManager, rx: Receiver<ClientIncomingRequest>) -> Self {
         let mut registry = Registry::new();
         registry.register("overlay:list_players", TemplateListPlayers {});
         registry.register("overlay:generic_text", TemplateGenericText);
         registry.register("overlay:generic_image", TemplateGenericImage);
+
+
+        registry.named("template:blah", "my_elem", Default::default());
 
         OverlayData {
             store: OverlayStorage::load().unwrap(),
@@ -417,7 +483,10 @@ impl EguiOverlay for OverlayData {
                             // });
                             ui.row(20.0, |mut ui| {
                                 ui.col(|col| {
-                                    col.checkbox(&mut false, "");
+                                    if col.checkbox(&mut false, "").changed() {
+                                        // self.store.approved_elems_ids. ...
+                                        self.store.save();
+                                    };
                                 });
                                 ui.col(|col| {
                                     col.strong("Custom Element Name");

@@ -31,6 +31,10 @@ impl Registry {
         self.templates.get(id).cloned()
     }
 
+    pub fn has(&self, id: &str) -> bool {
+        self.templates.contains_key(id)
+    }
+
     /// Creates a new temporarily element from a template id
     pub fn temp(&self, template_id: &str, state: ElementState) -> Option<Element> {
         self.templates.get(template_id)
@@ -44,9 +48,9 @@ impl Registry {
     }
 
     /// Creates an element with a fixed id
-    pub fn named(&self, template_id: &str, id: String, state: ElementState) -> Option<Element> {
+    pub fn named<S>(&self, template_id: &str, id: S, state: ElementState) -> Option<Element> where S: Into<String> {
         self.templates.get(template_id)
-            .map(|template| Element::with_id(id, template.clone(), state))
+            .map(|template| Element::with_id(id.into(), template.clone(), state))
     }
 
 
