@@ -16,6 +16,9 @@ use std::time::Instant;
 
 use std::str::FromStr;
 use std::sync::{Arc, Mutex, OnceLock};
+use tokio::io::Join;
+use tokio::task::JoinHandle;
+use tracing::debug;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 use crate::manager::{start_manager_read_thread, OverlayManagerInstance};
@@ -49,15 +52,33 @@ fn main() {
 
     // Set up the manager, this sends and receives all requests
     let target_process = get_target_process();
-    let manager = OverlayManagerInstance::new();
-    let manager = Arc::new(Mutex::new(manager));
 
-    // Start background tasks
-    let read_rx = start_manager_read_thread(manager.clone());
+    let mut ui_thread: Option<std::thread::JoinHandle<()>> = None;
 
-    // Start the UI
-    let state = OverlayData::example(manager, read_rx);
-    egui_overlay::start(state);
+    debug!("waiting for {}", target_process);
+    loop {
+        if true { // process found
+            if ui_thread.is_none() {
+                debug!("found process, starting UI");
+                ui_thread = Some(create_ui_thread());
+            }
+        }
+        std::thread::sleep(std::time::Duration::from_millis(PROCESS_CHECK_INTERVAL));
+    }
+}
+
+fn create_ui_thread() -> std::thread::JoinHandle<()> {
+    std::thread::spawn(|| {
+        let manager = OverlayManagerInstance::new();
+        let manager = Arc::new(Mutex::new(manager));
+
+        // Start background tasks
+        let read_rx = start_manager_read_thread(manager.clone());
+
+        // Start the UI
+        let state = OverlayData::example(manager, read_rx);
+        egui_overlay::start(state);
+    })
 }
 
 fn setup_logging() {
