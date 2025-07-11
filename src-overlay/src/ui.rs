@@ -18,7 +18,7 @@ use overlay_manager::ClientIncomingRequest;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tokio::sync::broadcast::Receiver;
-use tracing::{debug, info};
+use tracing::{debug, error, info};
 use tracing::log::trace;
 pub(crate) use crate::defs::{PlayerInfo, PlayerTeam, ServerInfo};
 use crate::defs::{TeamConfig, TeamShow};
@@ -58,7 +58,23 @@ pub struct OverlayData {
 
     startup_msg: StartupMessage,
 
-    store: OverlayStorage
+    store: OverlayStorage,
+
+    messages: Vec<Message>
+}
+
+enum MessageType {
+    Normal,
+    Info,
+    Success,
+    Error,
+    Warning
+}
+struct Message {
+    created_at: Instant,
+    _type: MessageType,
+    title: Option<String>,
+    content: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -92,9 +108,11 @@ impl OverlayStorage {
     pub fn save(&mut self) -> Result<(), String> {
         let paths = ProjectDirs::from("me.jackz", "jackzmc", "gameoverlay")
             .ok_or("Could not find save location".to_string())?;
-        let save_path = paths.data_dir().join("state.json");
-        info!("Save to {:?}", save_path);
-        let mut file = File::create(save_path).map_err(|err| err.to_string())?;
+        let data_dir = paths.data_dir();
+        let file_path = data_dir.join("state.json");
+        info!("Save to {:?}", file_path);
+        std::fs::create_dir_all(data_dir).map_err(|err| err.to_string())?;
+        let mut file = File::create(file_path).map_err(|err| err.to_string())?;
         file.write_all(serde_json::to_string_pretty(self).unwrap().as_bytes()).map_err(|err| err.to_string())?;
         Ok(())
     }
@@ -174,22 +192,26 @@ impl OverlayData {
         debug!("spawn_elem template={} id={}", template_id, id);
     }
 
-    /// Marks an element id as approved or unapproved
-    /// request_elem should be called at least once before this method is used
-    /// Will panic if element is not in list
-    pub fn set_elem_approval(&mut self, id: &str, value: bool) {
-        if let Some(server) = self.server() {
-            let list = self.store.approved_elems(server.ip_addr.clone());
-            let entry = list.get_mut(id).expect("request_elem not called before set_elem_approval; no entry");
-            entry.enabled = value;
-            debug!("set_elem_approval id={} value={}", id, value);
-        }
-    }
+    // /// Marks an element id as approved or unapproved
+    // /// request_elem should be called at least once before this method is used
+    // /// Will panic if element is not in list
+    // pub fn set_elem_approval(&mut self, id: &str, value: bool) {
+    //     if let Some(server) = self.server() {
+    //         let list = self.store.approved_elems(server.ip_addr.clone());
+    //         let entry = list.get_mut(id).expect("request_elem not called before set_elem_approval; no entry");
+    //         entry.enabled = value;
+    //         debug!("set_elem_approval id={} value={}", id, value);
+    //     }
+    // }
     pub fn server(&self) -> Option<&ServerInfo> {
         self.server.as_ref()
     }
     pub fn server_id(&self) -> Option<SocketAddr> {
         self.server.as_ref().map(|server| server.ip_addr.clone())
+    }
+    pub fn notify(&mut self, _type: MessageType, title: Option<String>, content: String) {
+        let msg = Message { created_at: Instant::now(), _type, title: title, content: content.into() };
+        self.messages.push(msg);
     }
     pub fn example(manager: OverlayManager, rx: Receiver<ClientIncomingRequest>) -> Self {
         let mut registry = Registry::new();
@@ -203,6 +225,7 @@ impl OverlayData {
         let mut s = OverlayData {
             store: OverlayStorage::load().unwrap(),
             manager,
+            messages: vec![],
             server: Some(ServerInfo {
                 name: "My Server".to_string(),
                 ip_addr: SocketAddr::from_str("127.0.0.1:27015").unwrap(),
@@ -497,22 +520,27 @@ impl EguiOverlay for OverlayData {
             if let Some(server_id) = self.server_id() {
                 ScrollArea::vertical().show(ui, |ui| {
                     TableBuilder::new(ui)
-                        .columns(Column::auto(), 3)
-                        .header(20.0, |mut row| {
+                        // .auto_shrink(false)
+                        .column(Column::auto())
+                        .column(Column::auto())
+                        .column(Column::remainder())
+                        .header(10.0, |mut row| {
                             row.col(|col| {});
                             row.col(|col| { col.strong("Element ID"); });
                             row.col(|col| { col.strong("Template ID"); });
                             // row.col(|col| { col.strong("")});
                         })
                         .body(|mut ui| {
+                            let mut changes = false;
                             let mut to_enable = vec![];
                             for (elem_id, entry) in self.store.approved_elems(server_id) {
-                                ui.row(20.0, |mut ui| {
+                                ui.row(10.0, |mut ui| {
                                     ui.col(|col| {
                                         if col.checkbox(&mut entry.enabled, "").changed() {
+                                            changes = true;
                                             if entry.enabled {
                                                 // Can't re-use self here, so hack, throw in list and enable it later
-                                                to_enable.push((elem_id.to_string(), entry.template_id.to_string(), entry.state.take()));
+                                                to_enable.push((entry.template_id.to_string(), elem_id.to_string(), entry.state.take()));
                                                 // self.spawn_elem(&template_id, id, None);
                                             }
                                         };
@@ -525,13 +553,16 @@ impl EguiOverlay for OverlayData {
                                     });
                                 })
                             }
-                            // Enable any entries that need to be enabled (hack)
-                            for l in to_enable {
-                                self.spawn_elem(&l.1, l.0, l.2);
+                            if changes {
+                                for item in to_enable {
+                                    self.spawn_elem(&item.0, item.1, item.2)
+                                }
+                                if let Err(e) = self.store.save() {
+                                    error!("Failed to save element approval changes: {}", e);
+                                    self.notify(MessageType::Error, Some("Saving failed".to_string()), e);
+                                }
                             }
                         });
-
-
                 });
             } else {
                 ui.label("Not connected to server");
