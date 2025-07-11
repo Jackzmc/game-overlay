@@ -1,7 +1,7 @@
 use std::any::Any;
 use std::fmt::{Debug, Display};
 use std::sync::Arc;
-use egui::Color32;
+use egui::{pos2, Color32, Id, Response, Ui, Widget, Window};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use strum_macros::EnumString;
@@ -66,6 +66,7 @@ impl Display for TemplateId {
 pub type ElementState = Value;
 pub struct Element {
     pub id: String,
+    pub win_id: egui::Id,
     pub template: TemplateInstance,
     pub state: ElementState,
 }
@@ -78,12 +79,39 @@ impl Element {
 
     pub fn with_id(id: String, template: TemplateInstance, state: ElementState) -> Self {
         Self {
-            id,
+            id: id.clone(),
+            win_id: Id::new(id),
             template: template.clone(),
             state,
         }
     }
+
+    pub fn show(&mut self, ctx: &egui::Context, server: &ServerInfo) {
+        Window::new(self.template.id())
+            .id(self.id.to_string().into())
+            .default_pos(pos2(1600.0, 400.0))
+            .show(ctx, |ui| {
+                ui.group(|ui| {
+                    ui.label(format!("ID: {}", self.id));
+                    ui.label(format!("TemplateId: {}", self.template.id()));
+                    let pos = ui.next_widget_position();
+                    ui.label(format!("Pos: ({}, {})", pos.x, pos.y));
+                    ui.collapsing("State", |ui| {
+                        ui.label(self.state.to_string());
+
+                    })
+                });
+                if let Err(err) = self.template.is_state_valid(&self.state) {
+                    ui.colored_label(Color32::RED, format!("This element has been misconfigured.\nError: {}", err));
+                } else {
+                    // No issues, render
+                    self.template.render(ui, server, &mut self.state);
+                }
+            });
+    }
 }
+
+
 
 pub struct TemplateInvalid;
 
