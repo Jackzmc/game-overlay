@@ -43,13 +43,14 @@ pub struct OverlayData {
     initialized: bool,
     startup_message_remain: Option<Instant>,
 
+    /// Determines visibility of the UI
     ui_state: UIState,
 
     read_rx: Receiver<ClientIncomingRequest>,
 
-    /// Key is element ID
+    /// Contains list of all active shown elements. Key is element ID
     elements: HashMap<String, Element>,
-
+    /// Contains list of all template ids
     registry: Registry,
 
     prompt_state: Option<PromptData>,
@@ -57,9 +58,9 @@ pub struct OverlayData {
     shortcuts: ShortcutContainer,
 
     startup_msg: StartupMessage,
-
+    /// Struct that is saved and loaded on startup
     store: OverlayStorage,
-
+    /// list of notification messages
     messages: Vec<Message>
 }
 
@@ -163,19 +164,18 @@ impl OverlayData {
             return Err("Not connected to any server".to_string())
         }
         let server = self.server.as_ref().unwrap();
-        // vec list is okay
-        // check if in list, if so, spawn here
         let entry = self.store.approved_elems(server.ip_addr.clone()).entry(id.to_string())
             .or_insert_with(|| ApproveEntry {
                 enabled: false,
                 template_id: template_id.to_string(),
+                // We store the state so if it is approved later, it can be pulled and have the correct state
                 state: Some(state),
             });
         if &entry.template_id != template_id {
             // TODO: just drop prev entry and require re-approval
             return Err(format!("Requested template ({}) does not match registered template ({})", template_id, entry.template_id));
         }
-        // finally, if approved then initialize it
+        // Finally, if entry is already enabled (from previous times), then we can spawn it right away
         let enabled = entry.enabled;
         if enabled {
             let state = entry.state.take();
@@ -184,7 +184,7 @@ impl OverlayData {
         Ok(enabled)
     }
 
-    /// Spawns an element (that is shown)
+    /// Spawns an element
     pub fn spawn_elem(&mut self, template_id: &str, id: String, state: Option<ElementState>) {
         let state = state.unwrap_or(json!({}));
         // TODO: check element doesn't exist? , instead of vec, hashmap?

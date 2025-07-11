@@ -2,7 +2,7 @@
 resolver = "3"
 members = [
     "src-tauri",
-    "src-manager",
+    "src-manager", "src-overlay-parent",
 #    "src-overlay"
 ]
 exclude = ["src-overlay"]
