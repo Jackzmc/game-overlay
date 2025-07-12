@@ -114,6 +114,7 @@ fn main() {
         env::set_var("RUST_LOG", format!("warn,{}=info", env!("CARGO_PKG_NAME")));
     }
 
+
     pretty_env_logger::init();
 
     let context = tauri::generate_context!();

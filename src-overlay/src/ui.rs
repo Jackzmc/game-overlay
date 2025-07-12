@@ -65,8 +65,6 @@ pub struct OverlayData {
     store: OverlayStorage,
     /// list of notification messages
     messages: Vec<Message>,
-    pub kill_signal: Arc<AtomicBool>,
-    signal_rx: std::sync::mpsc::Receiver<Signal>
 }
 
 enum MessageType {
@@ -218,7 +216,7 @@ impl OverlayData {
         let msg = Message { created_at: Instant::now(), _type, title: title, content: content.into() };
         self.messages.push(msg);
     }
-    pub fn example(manager: OverlayManager, manager_rx: Receiver<ClientIncomingRequest>, kill_signal: Arc<AtomicBool>, rx: std::sync::mpsc::Receiver<Signal>) -> Self {
+    pub fn example(manager: OverlayManager, manager_rx: Receiver<ClientIncomingRequest>) -> Self {
         let mut registry = Registry::new();
         registry.register("overlay:list_players", TemplateListPlayers {});
         registry.register("overlay:generic_text", TemplateGenericText);
@@ -228,7 +226,6 @@ impl OverlayData {
         registry.named("template:blah", "my_elem", Default::default());
 
         let mut s = OverlayData {
-            kill_signal,
             store: OverlayStorage::load().unwrap(),
             manager,
             messages: vec![],
@@ -302,7 +299,6 @@ impl OverlayData {
             startup_message_remain: Some(Instant::now()),
             ui_state: UIState::Inactive,
             read_rx: manager_rx,
-            signal_rx: rx,
             elements: HashMap::new(),
             prompt_state: Some(PromptData {
                 multiline: false,
@@ -416,17 +412,17 @@ impl EguiOverlay for OverlayData {
         _default_gfx_backend: &mut DefaultGfxBackend,
         glfw_backend: &mut egui_overlay::egui_window_glfw_passthrough::GlfwBackend,
     ) {
-        match self.signal_rx.try_recv() {
-            Ok(Signal::CloseUI) => {
-                debug!("Got kill signal, closing");
-                glfw_backend.window.set_should_close(true);
-                return;
-            },
-            Ok(Signal::HotkeyPressed) => {
-                self.toggle_ui_state();
-            }
-            Err(_) => {}
-        }
+        // match self.signal_rx.try_recv() {
+        //     Ok(Signal::CloseUI) => {
+        //         debug!("Got kill signal, closing");
+        //         glfw_backend.window.set_should_close(true);
+        //         return;
+        //     },
+        //     Ok(Signal::HotkeyPressed) => {
+        //         self.toggle_ui_state();
+        //     }
+        //     Err(_) => {}
+        // }
         // if self.kill_signal.load(Ordering::Relaxed) {
         //     debug!("Got kill signal, closing");
         //     glfw_backend.window.set_should_close(true);

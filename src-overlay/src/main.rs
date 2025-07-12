@@ -11,17 +11,21 @@ use std::cell::OnceCell;
 use std::collections::HashMap;
 use std::env;
 use std::net::{IpAddr, SocketAddr};
+use std::os::unix::process::parent_id;
+use std::os::unix::raw::pid_t;
 use std::path::PathBuf;
 use std::ptr::read;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use std::str::FromStr;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{channel, Sender};
 use std::thread::JoinHandle;
+use fork::{fork, waitpid, Fork};
 use global_hotkey::{GlobalHotKeyEvent, GlobalHotKeyManager, HotKeyState};
 use global_hotkey::hotkey::{Code, HotKey, Modifiers};
+use libc::SIGTERM;
 use sysinfo::{ProcessRefreshKind, ProcessesToUpdate, System, UpdateKind};
 use tokio::io::Join;
 use tokio::sync;
@@ -59,72 +63,90 @@ enum Signal {
     HotkeyPressed
 }
 struct UIContainer {
-    tx: Sender<Signal>,
-    handle: JoinHandle<()>
+    pid: pid_t,
+    wait_thread: JoinHandle<()>,
 }
 
 static ALWAYS_ACTIVE: OnceLock<bool> = OnceLock::new();
 fn main() {
+    ALWAYS_ACTIVE.set(env::var("ALWAYS_ACTIVE").is_ok()).unwrap();
+
     dotenvy::dotenv().ok();
     setup_logging();
 
-    ALWAYS_ACTIVE.set(env::var("ALWAYS_ACTIVE").is_ok()).unwrap();
-
     let target_proc_name = get_target_process();
-    let mut ui_thread: Option<std::thread::JoinHandle<()>> = None;
     let mut sys = System::new();
 
-    let kill_signal = Arc::new(AtomicBool::new(false)); // used to tell UI thread to
-    let hotkeys = GlobalHotKeyManager::new().unwrap();
-    let hotkey = HotKey::new(Some(Modifiers::CONTROL), Code::Home);
-    if let Err(e) = hotkeys.register(hotkey) {
-        error!("Registering global hotkey failed: {}", e);
+    let mut ui_cont: Option<UIContainer> = None;
+
+    info!("PID: {} - Waiting for {}", std::process::id(), target_proc_name);
+    'main: loop {
+       if check_for_process(&mut sys, &target_proc_name) {
+           // Process active, create ui process if not already, and check if process still running
+           // TODO: test on windows
+           match &ui_cont {
+               Some(ui) => {
+                   // egui sometimes crashes from seg fault seemingly randomly
+                   // so just keep relaunching until it works shrug ¯\_(ツ)_/¯
+                   if ui.wait_thread.is_finished() {
+                       error!("child process died. recreating?");
+                       ui_cont = None; // will cause a new fork()
+                   }
+               },
+               None => {
+                   // Fork the process, spawning a child process that becomes the UI
+                   // The main process here continues, and continues to check if target process & ui process are active
+                   match fork() {
+                       Ok(Fork::Parent(child)) => {
+                           // Running on parent:
+                           info!("ui child created: {}", child);
+                           ui_cont = Some(UIContainer {
+                               pid: child.clone(),
+                               // Used to detect if child died, thrad just waits until it ends
+                               wait_thread: std::thread::spawn(move || {
+                                   waitpid(child).expect("waitpid failed");
+                               })
+                           });
+                       }
+
+                       Ok(Fork::Child) => {
+                           // Running on child:
+                           info!("child alive, ending main loop");
+                           start_child_process();
+                           break 'main;
+                       }
+                       Err(e) => { panic!("fork failed: {}", e) }
+                   }
+               }
+
+           }
+       } else if let Some(ui) = ui_cont.take() {
+           // Process inactive, kill the ui child, if set
+           debug!("Waiting for child process to end");
+           unsafe {
+               libc::kill(ui.pid, SIGTERM);
+           }
+           ui.wait_thread.join().unwrap();
+           debug!("Child terminated");
+       }
+
+        std::thread::sleep(Duration::from_millis(500));
     }
-
-    let mut ui_container: Option<UIContainer> = None;
-
-    // TODO: if user requests daemon do this, and understand what
-    // let daemon = daemonize::Daemonize::new()
-    //     .pid_file("/tmp/gameoverlay.pid");
-    // daemon.start().unwrap();
-    debug!("waiting for {}", target_proc_name);
-    loop {
-        // Detect if a hotkey was pressed
-        if let Ok(event) = GlobalHotKeyEvent::receiver().try_recv() {
-            if event.state == HotKeyState::Released && event.id == hotkey.id {
-                debug!("Hotkey pressed, send to ui thread");
-                if let Some(ui) = &ui_container {
-                    ui.tx.send(Signal::HotkeyPressed).unwrap();
-                }
-                // try_start_ui_thread(&mut ui_thread, &kill_signal, &mut tx);
-            }
-        }
-
-        if check_for_process(&mut sys, &target_proc_name) {
-            // Process active, create ui thread if not already
-            try_start_ui_thread(&mut ui_container, &kill_signal);
-        } else if let Some(ui) = ui_container.take() {
-            // Process inactive, kill the ui thread, if set
-            debug!("waiting for UI thread to terminate");
-            // kill_signal.store(true, Ordering::Relaxed);
-            ui.tx.send(Signal::CloseUI).unwrap();
-            ui.handle.join().unwrap();
-            // kill_signal.store(false, Ordering::Relaxed);
-            debug!("UI thread terminated");
-        }
-        std::thread::sleep(std::time::Duration::from_millis(PROCESS_CHECK_INTERVAL_MS));
-    }
+    // Any code below here runs both on main and ui process
 }
 
-fn try_start_ui_thread(ui_container: &mut Option<UIContainer>, kill_signal: &Arc<AtomicBool>) {
-    if ui_container.is_none() {
-        debug!("spawning UI thread");
-        let (tx, rx) = channel::<Signal>();
-        *ui_container = Some(UIContainer {
-            tx,
-            handle: create_ui_thread(kill_signal.clone(), rx)
-        });
-    }
+/// Runs on child process, starting up and entering the egui event loop
+fn start_child_process() {
+    let manager = OverlayManagerInstance::new();
+    let manager = Arc::new(Mutex::new(manager));
+
+    // Start background tasks
+    let read_rx = start_manager_read_thread(manager.clone());
+
+    // Start the UI
+    let state = OverlayData::example(manager, read_rx);
+    info!("START ui loop");
+    egui_overlay::start(state);
 }
 
 /// Checks if process name exists, returning true if so
@@ -136,21 +158,21 @@ fn check_for_process(sys: &mut System, target_name: &str) -> bool {
     sys.processes_by_name(target_name.as_ref()).any(|p| true)
 }
 
-fn create_ui_thread(kill_signal: Arc<AtomicBool>, rx: std::sync::mpsc::Receiver<Signal>) -> JoinHandle<()> {
-    std::thread::spawn(|| {
-        // Set up the manager, this sends and receives all requests
-        let manager = OverlayManagerInstance::new();
-        let manager = Arc::new(Mutex::new(manager));
-
-        // Start background tasks
-        let read_rx = start_manager_read_thread(manager.clone());
-
-        // Start the UI
-        let state = OverlayData::example(manager, read_rx, kill_signal, rx);
-        info!("START ui loop");
-        egui_overlay::start(state);
-    })
-}
+// fn create_ui_thread(kill_signal: Arc<AtomicBool>, rx: std::sync::mpsc::Receiver<Signal>) -> JoinHandle<()> {
+//     std::thread::spawn(|| {
+//         // Set up the manager, this sends and receives all requests
+//         let manager = OverlayManagerInstance::new();
+//         let manager = Arc::new(Mutex::new(manager));
+//
+//         // Start background tasks
+//         let read_rx = start_manager_read_thread(manager.clone());
+//
+//         // Start the UI
+//         let state = OverlayData::example(manager, read_rx, kill_signal, rx);
+//         info!("START ui loop");
+//         egui_overlay::start(state);
+//     })
+// }
 
 fn setup_logging() {
     tracing_subscriber::registry()
