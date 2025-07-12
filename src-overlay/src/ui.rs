@@ -6,6 +6,8 @@ use std::io::{ErrorKind, Write};
 use std::net::SocketAddr;
 use std::ops::Sub;
 use std::str::FromStr;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant, SystemTime};
 use directories_next::ProjectDirs;
 use egui::{pos2, vec2, Align, Align2, Button, Color32, FontId, Frame, Id, InputState, Key, KeyboardShortcut, Layout, Margin, MenuBar, Modal, Modifiers, Order, Response, ScrollArea, Stroke, TextEdit, TextFormat, Theme, Ui, Widget, Window};
@@ -61,7 +63,8 @@ pub struct OverlayData {
     /// Struct that is saved and loaded on startup
     store: OverlayStorage,
     /// list of notification messages
-    messages: Vec<Message>
+    messages: Vec<Message>,
+    pub kill_signal: Arc<AtomicBool>,
 }
 
 enum MessageType {
@@ -213,7 +216,7 @@ impl OverlayData {
         let msg = Message { created_at: Instant::now(), _type, title: title, content: content.into() };
         self.messages.push(msg);
     }
-    pub fn example(manager: OverlayManager, rx: Receiver<ClientIncomingRequest>) -> Self {
+    pub fn example(manager: OverlayManager, rx: Receiver<ClientIncomingRequest>, kill_signal: Arc<AtomicBool>) -> Self {
         let mut registry = Registry::new();
         registry.register("overlay:list_players", TemplateListPlayers {});
         registry.register("overlay:generic_text", TemplateGenericText);
@@ -223,6 +226,7 @@ impl OverlayData {
         registry.named("template:blah", "my_elem", Default::default());
 
         let mut s = OverlayData {
+            kill_signal,
             store: OverlayStorage::load().unwrap(),
             manager,
             messages: vec![],
@@ -411,6 +415,11 @@ impl EguiOverlay for OverlayData {
         _default_gfx_backend: &mut DefaultGfxBackend,
         glfw_backend: &mut egui_overlay::egui_window_glfw_passthrough::GlfwBackend,
     ) {
+        if self.kill_signal.load(Ordering::Relaxed) {
+            debug!("Got kill signal, closing");
+            glfw_backend.window.set_should_close(true);
+            return;
+        }
         if !self.initialized {
             self.initialized = true;
             glfw_backend.set_window_size([2560.0, 1440.0]);
