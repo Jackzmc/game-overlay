@@ -17,9 +17,11 @@ use std::time::Instant;
 use std::str::FromStr;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::thread::JoinHandle;
+use global_hotkey::{GlobalHotKeyEvent, GlobalHotKeyManager, HotKeyState};
+use global_hotkey::hotkey::{Code, HotKey, Modifiers};
 use sysinfo::{ProcessRefreshKind, ProcessesToUpdate, System, UpdateKind};
 use tokio::io::Join;
-use tokio::task::JoinHandle;
 use tracing::{debug, info};
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::{fmt, prelude::*, EnvFilter};
@@ -52,25 +54,34 @@ fn main() {
     dotenvy::dotenv().ok();
     setup_logging();
 
-    // Set up the manager, this sends and receives all requests
     let target_proc_name = get_target_process();
-
     let mut ui_thread: Option<std::thread::JoinHandle<()>> = None;
-
     let mut sys = System::new();
 
     debug!("waiting for {}", target_proc_name);
     let kill_signal = Arc::new(AtomicBool::new(false)); // used to tell UI thread to end
+    let hotkeys = GlobalHotKeyManager::new().unwrap();
+    let hotkey = HotKey::new(Some(Modifiers::CONTROL), Code::Home);
+    hotkeys.register(hotkey).unwrap();
+
+    // TODO: if user requests daemon do this, and understand what
+    // let daemon = daemonize::Daemonize::new()
+    //     .pid_file("/tmp/gameoverlay.pid");
+    // daemon.start().unwrap();
     loop {
+        // Detect if a hotkey was pressed
+        if let Ok(event) = GlobalHotKeyEvent::receiver().try_recv() {
+            if event.state == HotKeyState::Released && event.id == hotkey.id {
+                debug!("Hotkey pressed, send to ui thread");
+                try_start_ui_thread(&mut ui_thread, &kill_signal);
+            }
+        }
+
         if check_for_process(&mut sys, &target_proc_name) {
             // Process active, create ui thread if not already
-            if ui_thread.is_none() {
-                debug!("found process, spawning UI thread");
-                ui_thread = Some(create_ui_thread(kill_signal.clone()));
-            }
+            try_start_ui_thread(&mut ui_thread, &kill_signal);
         } else if let Some(thread) = ui_thread.take() {
-            // Process inactive
-            // Kill the ui thread, if set
+            // Process inactive, kill the ui thread, if set
             debug!("waiting for UI thread to terminate");
             kill_signal.store(true, Ordering::Relaxed);
             thread.join().unwrap();
@@ -81,6 +92,14 @@ fn main() {
     }
 }
 
+fn try_start_ui_thread(ui_thread: &mut Option<JoinHandle<()>>, kill_signal: &Arc<AtomicBool>) {
+    if ui_thread.is_none() {
+        debug!("spawning UI thread");
+        *ui_thread = Some(create_ui_thread(kill_signal.clone()));
+    }
+}
+
+/// Checks if process name exists, returning true if so
 fn check_for_process(sys: &mut System, target_name: &str) -> bool {
     sys.refresh_processes_specifics(ProcessesToUpdate::All, true, ProcessRefreshKind::nothing().with_cmd(UpdateKind::Always));
     sys.processes_by_name(target_name.as_ref()).any(|p| true)
@@ -88,6 +107,7 @@ fn check_for_process(sys: &mut System, target_name: &str) -> bool {
 
 fn create_ui_thread(kill_signal: Arc<AtomicBool>) -> std::thread::JoinHandle<()> {
     std::thread::spawn(|| {
+        // Set up the manager, this sends and receives all requests
         let manager = OverlayManagerInstance::new();
         let manager = Arc::new(Mutex::new(manager));
 
