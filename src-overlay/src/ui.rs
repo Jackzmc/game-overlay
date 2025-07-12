@@ -26,6 +26,7 @@ pub(crate) use crate::defs::{PlayerInfo, PlayerTeam, ServerInfo};
 use crate::defs::{TeamConfig, TeamShow};
 use crate::manager::OverlayManager;
 use crate::registry::Registry;
+use crate::Signal;
 use crate::templates::list_player::TemplateListPlayers;
 use crate::templates::{Element, ElementState, Template};
 use crate::templates::CoreTemplate::GenericText;
@@ -65,6 +66,7 @@ pub struct OverlayData {
     /// list of notification messages
     messages: Vec<Message>,
     pub kill_signal: Arc<AtomicBool>,
+    signal_rx: std::sync::mpsc::Receiver<Signal>
 }
 
 enum MessageType {
@@ -216,7 +218,7 @@ impl OverlayData {
         let msg = Message { created_at: Instant::now(), _type, title: title, content: content.into() };
         self.messages.push(msg);
     }
-    pub fn example(manager: OverlayManager, rx: Receiver<ClientIncomingRequest>, kill_signal: Arc<AtomicBool>) -> Self {
+    pub fn example(manager: OverlayManager, manager_rx: Receiver<ClientIncomingRequest>, kill_signal: Arc<AtomicBool>, rx: std::sync::mpsc::Receiver<Signal>) -> Self {
         let mut registry = Registry::new();
         registry.register("overlay:list_players", TemplateListPlayers {});
         registry.register("overlay:generic_text", TemplateGenericText);
@@ -299,7 +301,8 @@ impl OverlayData {
             initialized: false,
             startup_message_remain: Some(Instant::now()),
             ui_state: UIState::Inactive,
-            read_rx: rx,
+            read_rx: manager_rx,
+            signal_rx: rx,
             elements: HashMap::new(),
             prompt_state: Some(PromptData {
                 multiline: false,
@@ -344,16 +347,14 @@ impl OverlayData {
         s
     }
 
-    pub fn run_inputs(&mut self, input: &mut InputState) {
-        if input.consume_shortcut(&self.shortcuts.toggle) {
-            debug!("CTRL+HOME pressed, switching state");
-            if self.ui_state == UIState::DetailActive {
-                self.ui_state = UIState::Active;
-                trace!("state set to normal active");
-            } else {
-                self.ui_state = UIState::DetailActive;
-                trace!("state set to detail active");
-            }
+    pub fn toggle_ui_state(&mut self) {
+        debug!("CTRL+HOME pressed, switching state");
+        if self.ui_state == UIState::DetailActive {
+            self.ui_state = UIState::Active;
+            trace!("state set to normal active");
+        } else {
+            self.ui_state = UIState::DetailActive;
+            trace!("state set to detail active");
         }
     }
 }
@@ -415,11 +416,22 @@ impl EguiOverlay for OverlayData {
         _default_gfx_backend: &mut DefaultGfxBackend,
         glfw_backend: &mut egui_overlay::egui_window_glfw_passthrough::GlfwBackend,
     ) {
-        if self.kill_signal.load(Ordering::Relaxed) {
-            debug!("Got kill signal, closing");
-            glfw_backend.window.set_should_close(true);
-            return;
+        match self.signal_rx.try_recv() {
+            Ok(Signal::CloseUI) => {
+                debug!("Got kill signal, closing");
+                glfw_backend.window.set_should_close(true);
+                return;
+            },
+            Ok(Signal::HotkeyPressed) => {
+                self.toggle_ui_state();
+            }
+            Err(_) => {}
         }
+        // if self.kill_signal.load(Ordering::Relaxed) {
+        //     debug!("Got kill signal, closing");
+        //     glfw_backend.window.set_should_close(true);
+        //     return;
+        // }
         if !self.initialized {
             self.initialized = true;
             glfw_backend.set_window_size([2560.0, 1440.0]);
@@ -427,7 +439,7 @@ impl EguiOverlay for OverlayData {
             egui_context.set_theme(Theme::Light);
         }
 
-        egui_context.input_mut(|input| { self.run_inputs(input) });
+        // egui_context.input_mut(|input| { self.toggle_ui_state(input) });
 
 
         if self.ui_state == UIState::DetailActive {
