@@ -35,33 +35,10 @@ use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 use crate::manager::{start_manager_read_thread, OverlayManagerInstance};
 use crate::ui::OverlayData;
 
-const PROCESS_CHECK_INTERVAL_MS: u64 = 100;
+const MAIN_INTERVAL_SLEEP_MS: u64 = 500;
 
 static TARGET_PROC_NAME: OnceLock<String> = OnceLock::new();
 
-#[derive(PartialEq, serde::Serialize, Clone, Debug)]
-enum ViewState {
-    Hidden,
-    Visible,
-    Interactable /* Should not change without user's control */
-}
-
-
-// struct AppData {
-//     sys: System,
-//     view_state: ViewState,
-//     manager: OverlayManager,
-//     config_file_path: PathBuf,
-//     config: AppConfig,
-//     http_url: Url,
-//     element_cache: HashMap<String, UITemplate>
-// }
-
-#[derive(Clone)]
-enum Signal {
-    CloseUI,
-    HotkeyPressed
-}
 struct UIContainer {
     pid: pid_t,
     wait_thread: JoinHandle<()>,
@@ -69,10 +46,10 @@ struct UIContainer {
 
 static ALWAYS_ACTIVE: OnceLock<bool> = OnceLock::new();
 fn main() {
-    ALWAYS_ACTIVE.set(env::var("ALWAYS_ACTIVE").is_ok()).unwrap();
-
     dotenvy::dotenv().ok();
     setup_logging();
+
+    ALWAYS_ACTIVE.set(env::var("ALWAYS_ACTIVE").is_ok()).unwrap();
 
     let target_proc_name = get_target_process();
     let mut sys = System::new();
@@ -102,7 +79,7 @@ fn main() {
                            info!("ui child created: {}", child);
                            ui_cont = Some(UIContainer {
                                pid: child.clone(),
-                               // Used to detect if child died, thrad just waits until it ends
+                               // Used to detect if child died, thread just waits until it ends
                                wait_thread: std::thread::spawn(move || {
                                    waitpid(child).expect("waitpid failed");
                                })
@@ -129,8 +106,7 @@ fn main() {
            ui.wait_thread.join().unwrap();
            debug!("Child terminated");
        }
-
-        std::thread::sleep(Duration::from_millis(500));
+        std::thread::sleep(Duration::from_millis(MAIN_INTERVAL_SLEEP_MS));
     }
     // Any code below here runs both on main and ui process
 }
