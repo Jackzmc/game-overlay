@@ -2,7 +2,7 @@ use std::cmp::PartialEq;
 use std::collections::HashMap;
 use std::fmt::Display;
 use std::fs::{read_to_string, File};
-use std::io::{ErrorKind, Write};
+use std::io::{ErrorKind, PipeReader, Write};
 use std::net::SocketAddr;
 use std::ops::Sub;
 use std::str::FromStr;
@@ -26,7 +26,6 @@ pub(crate) use crate::defs::{PlayerInfo, PlayerTeam, ServerInfo};
 use crate::defs::{TeamConfig, TeamShow};
 use crate::manager::OverlayManager;
 use crate::registry::Registry;
-use crate::Signal;
 use crate::templates::list_player::TemplateListPlayers;
 use crate::templates::{Element, ElementState, Template};
 use crate::templates::CoreTemplate::GenericText;
@@ -65,6 +64,8 @@ pub struct OverlayData {
     store: OverlayStorage,
     /// list of notification messages
     messages: Vec<Message>,
+    reader: std::sync::mpsc::Receiver<Vec<u8>>,
+    pub target_pid: u32,
 }
 
 enum MessageType {
@@ -216,7 +217,7 @@ impl OverlayData {
         let msg = Message { created_at: Instant::now(), _type, title: title, content: content.into() };
         self.messages.push(msg);
     }
-    pub fn example(manager: OverlayManager, manager_rx: Receiver<ClientIncomingRequest>) -> Self {
+    pub fn example(manager: OverlayManager, manager_rx: Receiver<ClientIncomingRequest>, reader: std::sync::mpsc::Receiver<Vec<u8>>, target_pid: u32) -> Self {
         let mut registry = Registry::new();
         registry.register("overlay:list_players", TemplateListPlayers {});
         registry.register("overlay:generic_text", TemplateGenericText);
@@ -226,6 +227,8 @@ impl OverlayData {
         registry.named("template:blah", "my_elem", Default::default());
 
         let mut s = OverlayData {
+            target_pid: target_pid,
+            reader,
             store: OverlayStorage::load().unwrap(),
             manager,
             messages: vec![],
@@ -412,30 +415,25 @@ impl EguiOverlay for OverlayData {
         _default_gfx_backend: &mut DefaultGfxBackend,
         glfw_backend: &mut egui_overlay::egui_window_glfw_passthrough::GlfwBackend,
     ) {
-        // match self.signal_rx.try_recv() {
-        //     Ok(Signal::CloseUI) => {
-        //         debug!("Got kill signal, closing");
-        //         glfw_backend.window.set_should_close(true);
-        //         return;
-        //     },
-        //     Ok(Signal::HotkeyPressed) => {
-        //         self.toggle_ui_state();
-        //     }
-        //     Err(_) => {}
-        // }
-        // if self.kill_signal.load(Ordering::Relaxed) {
-        //     debug!("Got kill signal, closing");
-        //     glfw_backend.window.set_should_close(true);
-        //     return;
-        // }
         if !self.initialized {
             self.initialized = true;
             glfw_backend.set_window_size([2560.0, 1440.0]);
             install_image_loaders(egui_context);
             egui_context.set_theme(Theme::Light);
         }
+        egui_context.input_mut(|input| {
+            if input.consume_shortcut(&self.shortcuts.toggle) {
+                self.toggle_ui_state();
+            }
+        });
 
-        // egui_context.input_mut(|input| { self.toggle_ui_state(input) });
+
+        if let Ok(data) = self.reader.try_recv() {
+            debug!("got data: {:?}", data);
+            // TODO: use self.target_pid, grab main window, and then run below:
+            // glfw_backend.window.set_pos(0, 0);
+            // glfw_backend.set_window_size([2560.0, 1440.0]);
+        }
 
 
         if self.ui_state == UIState::DetailActive {
