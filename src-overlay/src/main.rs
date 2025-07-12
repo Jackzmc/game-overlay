@@ -10,6 +10,7 @@ mod registry;
 use std::cell::OnceCell;
 use std::collections::HashMap;
 use std::env;
+use std::io::{pipe, PipeReader, PipeWriter, Read};
 use std::net::{IpAddr, SocketAddr};
 use std::os::unix::process::parent_id;
 use std::os::unix::raw::pid_t;
@@ -26,7 +27,7 @@ use fork::{fork, waitpid, Fork};
 use global_hotkey::{GlobalHotKeyEvent, GlobalHotKeyManager, HotKeyState};
 use global_hotkey::hotkey::{Code, HotKey, Modifiers};
 use libc::SIGTERM;
-use sysinfo::{ProcessRefreshKind, ProcessesToUpdate, System, UpdateKind};
+use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System, UpdateKind};
 use tokio::io::Join;
 use tokio::sync;
 use tracing::{debug, error, info};
@@ -56,9 +57,12 @@ fn main() {
 
     let mut ui_cont: Option<UIContainer> = None;
 
+    // TODO: need to have ui native window follow target proc window?
+    let (reader, writer) = pipe().unwrap();
+
     info!("PID: {} - Waiting for {}", std::process::id(), target_proc_name);
     'main: loop {
-       if check_for_process(&mut sys, &target_proc_name) {
+       if let Some(target_pid) = check_for_process(&mut sys, &target_proc_name) {
            // Process active, create ui process if not already, and check if process still running
            // TODO: test on windows
            match &ui_cont {
@@ -82,14 +86,14 @@ fn main() {
                                // Used to detect if child died, thread just waits until it ends
                                wait_thread: std::thread::spawn(move || {
                                    waitpid(child).expect("waitpid failed");
-                               })
+                               }),
                            });
                        }
 
                        Ok(Fork::Child) => {
                            // Running on child:
                            info!("child alive, ending main loop");
-                           start_child_process();
+                           start_child_process(reader, target_pid);
                            break 'main;
                        }
                        Err(e) => { panic!("fork failed: {}", e) }
@@ -112,26 +116,36 @@ fn main() {
 }
 
 /// Runs on child process, starting up and entering the egui event loop
-fn start_child_process() {
+fn start_child_process(mut reader: PipeReader, target_pid: u32) {
     let manager = OverlayManagerInstance::new();
     let manager = Arc::new(Mutex::new(manager));
 
     // Start background tasks
     let read_rx = start_manager_read_thread(manager.clone());
 
+    let (tx, rx) = channel();
+    std::thread::spawn(move || {
+        let mut buf = [0u8; 1024];
+        while let Ok(n) = reader.read(&mut buf) {
+            if n > 0 {
+                tx.send(buf[..n].to_vec()).unwrap();
+            }
+        }
+    });
+
     // Start the UI
-    let state = OverlayData::example(manager, read_rx);
+    let state = OverlayData::example(manager, read_rx, rx, target_pid);
     info!("START ui loop");
     egui_overlay::start(state);
 }
 
-/// Checks if process name exists, returning true if so
-fn check_for_process(sys: &mut System, target_name: &str) -> bool {
+/// Checks if process name exists, returning the pid of the process
+fn check_for_process(sys: &mut System, target_name: &str) -> Option<u32> {
     if *ALWAYS_ACTIVE.get().unwrap() {
-        return true;
+        return Some(0);
     }
     sys.refresh_processes_specifics(ProcessesToUpdate::All, true, ProcessRefreshKind::nothing().with_cmd(UpdateKind::Always));
-    sys.processes_by_name(target_name.as_ref()).any(|p| true)
+    sys.processes_by_name(target_name.as_ref()).find(|p| true).map(|p| p.pid().as_u32())
 }
 
 // fn create_ui_thread(kill_signal: Arc<AtomicBool>, rx: std::sync::mpsc::Receiver<Signal>) -> JoinHandle<()> {
