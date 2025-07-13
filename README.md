@@ -1,6 +1,9 @@
 # Game Overlay
 
-Adds an overlay in game that dedicated servers with a plugin can add elements to, allowing for custom elements that include text, actions, admin tools, etc. For an example, the server can send a player list, where an admin can quickly see all players, see their health, items, and any other extra information. In addition, admins could also quickly kick, ban, or perform other plugin actions, with a friendly UI than that source engine can provide.
+A in-game overlay for source engine games that allow for custom UI elements, such as text, graphics, admin tools, etc, driven by server side plugins.
+Servers with overlay plugin can send custom elements, such as an admin tool to quickly add notes to any players with a friendlier UI than in-game source engine menus.
+
+Other examples are elements that show extra player information such as health, items, position, and any other information fed from custom plugins. 
 
 > [!WARNING]
 > Project is still in heavy development and may be abandoned for a while any time. 
@@ -9,7 +12,8 @@ Adds an overlay in game that dedicated servers with a plugin can add elements to
 
 ## Implementation
 
-All sides are written in rust, using websockets to communicate to the manager
+The manager and client are written in rust, using websockets to communicate to the manager.
+The server plugin is written in as a sourcemod plugin.
 
 [Client] <== websocket ==> [Manager] <== websocket ==> [Server]
 
