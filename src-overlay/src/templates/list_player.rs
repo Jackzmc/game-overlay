@@ -9,8 +9,9 @@ use serde_json::Value::Null;
 use steamid_ng::SteamID;
 use tracing::debug;
 use tracing::log::warn;
+use overlay_common::ElementState;
 use crate::defs::{ServerInfo, TeamShow};
-use crate::templates::{ElementState, Template};
+use crate::templates::{ Template};
 
 #[derive(Default)]
 pub struct TemplateListPlayers;

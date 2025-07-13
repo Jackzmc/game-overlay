@@ -1,7 +1,8 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 use serde_json::json;
-use crate::templates::{Element, ElementState, Template, TemplateId, TemplateInstance, TemplateInvalid};
+use overlay_common::ElementState;
+use crate::templates::{Element, Template, TemplateId, TemplateInstance, TemplateInvalid};
 
 pub struct Registry {
     templates: HashMap<String, TemplateInstance>,

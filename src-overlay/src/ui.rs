@@ -19,15 +19,17 @@ use egui_overlay::egui_render_three_d::ThreeDBackend as DefaultGfxBackend;
 use overlay_common::events::ClientEvent;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use strum_macros::Display;
 use tokio::sync::broadcast::Receiver;
 use tracing::{debug, error, info};
 use tracing::log::trace;
+use overlay_common::ElementState;
 pub(crate) use crate::defs::{PlayerInfo, PlayerTeam, ServerInfo};
 use crate::defs::{TeamConfig, TeamShow};
-use crate::manager::{SocketClient, SocketMessage};
+use crate::manager::{ManagerConnStatus, SocketClient, SocketMessage};
 use crate::registry::Registry;
 use crate::templates::list_player::TemplateListPlayers;
-use crate::templates::{Element, ElementState, Template};
+use crate::templates::{Element,  Template};
 use crate::templates::CoreTemplate::GenericText;
 use crate::templates::generic::{TemplateGenericImage, TemplateGenericText};
 
@@ -66,8 +68,10 @@ pub struct OverlayData {
     messages: Vec<Message>,
     reader: std::sync::mpsc::Receiver<Vec<u8>>,
     pub target_pid: u32,
+    conn_state: ManagerConnStatus
 }
 
+#[derive(Debug, Display)]
 enum MessageType {
     Normal,
     Info,
@@ -204,7 +208,11 @@ impl OverlayData {
     }
     pub fn notify(&mut self, _type: MessageType, title: Option<String>, content: String) {
         let msg = Message { created_at: Instant::now(), _type, title: title, content: content.into() };
+        debug!("[MESSAGE] {}: {}", msg._type, msg.content);
         self.messages.push(msg);
+    }
+    pub fn notify_err(&mut self, msg: String, title: Option<String>) {
+        self.notify(MessageType::Error, title, msg)
     }
     pub fn example(manager: SocketClient, manager_rx: Receiver<SocketMessage>, reader: std::sync::mpsc::Receiver<Vec<u8>>, target_pid: u32) -> Self {
         let mut registry = Registry::new();
@@ -301,7 +309,8 @@ impl OverlayData {
             shortcuts: ShortcutContainer {
                 toggle: KeyboardShortcut::new(Modifiers::CTRL, Key::Home)
             },
-            registry
+            registry,
+            conn_state: ManagerConnStatus::Disconnected { reason: None },
         };
         s.request_elem("overlay:list_players", "list_players_test",
        json!({
@@ -383,6 +392,7 @@ impl UIElement for StartupMessage {
     }
 }
 
+
 impl EguiOverlay for OverlayData {
     fn gui_run(
         &mut self,
@@ -390,6 +400,36 @@ impl EguiOverlay for OverlayData {
         _default_gfx_backend: &mut DefaultGfxBackend,
         glfw_backend: &mut egui_overlay::egui_window_glfw_passthrough::GlfwBackend,
     ) {
+        while let Ok(event) = self.socket_rx.try_recv() {
+            // TODO: extract own func
+            match event {
+                SocketMessage::ClientEvent(event) => {
+                  match event {
+                      ClientEvent::ChangedServer(server) => {
+
+                      },
+                      ClientEvent::JoinedServer { server_id, server_name, server_ip } => {}
+                      ClientEvent::LeftServer => {}
+                      ClientEvent::GameData { .. } => {}
+                      ClientEvent::Authorized { .. } => {}
+                      ClientEvent::RequestElement { elem_id, template_id, state, options } => {
+                          if let Err(err) = self.request_elem(&template_id, &template_id, state) {
+                              self.notify_err(err, Some("Error processing event".to_string()))
+                          }
+                      },
+                      ClientEvent::UpdateElement { elem_id, state, new_options } => {
+
+                      },
+                      ClientEvent::UpdateElement { .. } => {}
+                      ClientEvent::ChangeAudioState { .. } => {}
+                  }
+                },
+                SocketMessage::Connection(conn) => {
+                    self.conn_state = conn;
+                }
+            }
+        }
+
         if !self.initialized {
             self.initialized = true;
             glfw_backend.set_window_size([2560.0, 1440.0]);

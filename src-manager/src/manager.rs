@@ -16,6 +16,7 @@ use steamid_ng::{SteamID, SteamIDError};
 use tokio::sync::mpsc::UnboundedSender;
 use overlay_common::events::{ClientEvent, ServerEvent};
 use overlay_common::requests::{ClientRequest, ServerRequest};
+use overlay_common::TargetPlayer;
 use overlay_manager::{AuthFailure};
 use crate::client::{ClientInstance};
 use crate::{AppError, JWT_SECRET_KEY};
@@ -268,22 +269,27 @@ impl ManagerInstance {
             //     }
             //     debug!("forwarded tmp ui to {} clients", steamids.len());
             // },
-            ServerRequest::CreateElement { steamids, registry } => {
-                trace!("forwarding create element {} template {}{}", registry.instance_id, registry.namespace, registry.template_id);
-                self.perform_selection(&server, steamids, |client| {
+            ServerRequest::RequestElement { target, elem_id, template_id, state, options } => {
+                trace!("{:?}", event);
+                self.perform_selection(&server, target, |client| {
                     debug!("forwarding create ui to client {}", client.id());
-                    client.send_event(&ClientEvent::CreateElement {
-                        registry: registry.clone()
+                    client.send_event(&ClientEvent::RequestElement {
+                        elem_id: elem_id.to_string(),
+                        template_id: template_id.to_string(),
+                        state: state.clone(),
+                        options: options.clone()
                     }).unwrap();
                 });
                 trace!("create element - done");
             },
-            ServerRequest::UpdateElement { steamids, registry } => {
-                trace!("forwarding update element {}", registry.instance_id);
-                self.perform_selection(&server, steamids, |client| {
+            ServerRequest::UpdateElement { target, elem_id, state, new_options } => {
+                trace!("{:?}", event);
+                self.perform_selection(&server, target, |client| {
                     debug!("forwarding update ui to client {}", client.id());
                     client.send_event(&ClientEvent::UpdateElement {
-                        registry: registry.clone()
+                        elem_id: elem_id.to_string(),
+                        state: state.clone(),
+                        new_options: new_options.clone()
                     }).unwrap();
                 });
                 trace!("update element - done");
@@ -299,26 +305,35 @@ impl ManagerInstance {
         Ok(())
     }
 
-    async fn perform_selection<F>(&mut self, server: &Server, client_ids: &Option<Vec<String>>, mut closure: F) -> Result<(), SteamIDError>
+    /// Converts a selection to a list of steamids
+    fn selection_to_list(&mut self, all_players: &Vec<SteamID>, selection: &TargetPlayer) -> Result<Vec<SteamID>, SteamIDError> {
+        match selection {
+            TargetPlayer::Single(steamid) => {
+                let steamid = SteamID::from_steam2(steamid)?;
+                Ok(vec![steamid])
+            }
+            TargetPlayer::Many(steamids) => steamids.into_iter().map(|s| SteamID::from_steam2(&s)).collect(),
+            TargetPlayer::All => Ok(all_players.clone()),
+        }
+    }
+
+    async fn perform_selection<F>(&mut self, server: &Server, selection: &TargetPlayer, mut closure: F) -> Result<(), SteamIDError>
         where F: FnMut(MutexGuard<ClientInstance>) -> ()
     {
         let server = server.lock().await;
-        let server_clients = server.client_ids();
+        let all_players = server.client_ids();
+        let mut steamids = self.selection_to_list(&all_players, selection)?;
         drop(server);
 
-        let mut client_ids: Vec<SteamID> = client_ids.as_ref()
-            // .map(|s| SteamID::from_steam2(s))
-            .map(|vec| vec.iter().map(|s| SteamID::from_steam2(s)).collect())
-            .unwrap_or_else(|| Ok(server_clients.clone()))?;
         // Filter out clients that aren't connected
-        client_ids.retain(|id| server_clients.contains(id));
+        steamids.retain(|id| all_players.contains(id));
         // let client_ids: Result<Vec<SteamID>, SteamIDError> = match selection {
         //     ClientSelection::Steamid(s) => Ok(vec![SteamID::from_steam2(s)?]),
         //     ClientSelection::Steamids(steamids) => steamids.iter().map(|s| SteamID::from_steam2(s)).collect(),
         //     ClientSelection::All => Ok(server_clients.clone())
         // };
-        for client_id in &client_ids {
-            if let Some(client) = self.get_client_from_steamid(&client_id) {
+        for steamid in &steamids {
+            if let Some(client) = self.get_client_from_steamid(&steamid) {
                 let mut client = client.lock().await;
                 closure(client);
             }

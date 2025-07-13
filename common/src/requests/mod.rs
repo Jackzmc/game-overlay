@@ -1,5 +1,5 @@
 use serde::{Serialize, Deserialize};
-use crate::{CreateElementRegister, SteamUser, UITemplate, UpdateElementRegister};
+use crate::{CreateElementRegister, ElementOptions, ElementState, SteamUser, TargetPlayer, UITemplate, UpdateElementRegister};
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(tag = "type")]
@@ -14,18 +14,29 @@ pub enum ClientRequest {
 #[serde(rename_all = "snake_case")]
 /// Messages that are being received from server. (Server -> Manager)
 pub enum ServerRequest {
+    /*
+    TODO: plan
+        either:
+         - [A] have manager be the one making decisions:
+            - server says player A connected
+            - manager then tells client you joined server, here's server info
+            - basically: manager adds on data
+
+            - can impl GameState, but the types of ServerInfo will be diff
+         - [B] have server send full event
+            - server sends ClientEvent::Connected with full server info, goes straight to client with full data
+            - basically: server sends full data, manager just passes along
+
+
+    */
+
     PlayerJoined { steamid: String },
     PlayerLeft { steamid: String },
     GameState {}, // TODO: implement
-    RegisterTempUi { steamids: Option<Vec<String>>,  elem_id: String, expires_seconds: Option<u64>, element: UITemplate },
-    CreateElement { steamids: Option<Vec<String>>,
-        #[serde(flatten)]
-        registry: CreateElementRegister
-    },
-    UpdateElement { steamids: Option<Vec<String>>,
-        #[serde(flatten)]
-        registry: UpdateElementRegister
-    },
+    /// Creates a new element for a client
+    RequestElement { target: TargetPlayer, elem_id: String, template_id: String, state: ElementState, options: Option<ElementOptions> },
+    /// Updates an element by id, with optional new options (overwrites existing)
+    UpdateElement { target: TargetPlayer, elem_id: String, state: ElementState, new_options: Option<ElementOptions> },
     ChangeAudioState { steamids: Option<Vec<String>> , source: String, state: u8, volume: Option<f32>, start_time: Option<f32>, repeat: Option<bool> }
-
 }
+

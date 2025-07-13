@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use strum_macros::EnumString;
 use uuid::Uuid;
+use overlay_common::ElementState;
 use crate::defs::ServerInfo;
 
 pub mod list_player;
@@ -63,8 +64,6 @@ impl Display for TemplateId {
         write!(f, "{}", str)
     }
 }
-
-pub type ElementState = Value;
 pub struct Element {
     pub id: String,
     pub win_id: egui::Id,

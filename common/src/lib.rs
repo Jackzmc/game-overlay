@@ -1,11 +1,13 @@
 use std::error::Error;
 use std::fmt;
-use std::net::IpAddr;
+use std::net::{IpAddr, SocketAddr};
+use std::time::Instant;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 pub mod events;
 pub mod requests;
+mod game;
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct CreateElementRegister {
@@ -123,4 +125,15 @@ pub struct SteamUser {
     pub steamid: String,
     #[serde(rename = "timecreated")]
     pub time_created: i64,
+}
+
+pub type ElementState = Value;
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub enum TargetPlayer {
+    /// A single player
+    Single(String),
+    Many(Vec<String>),
+    /// All players
+    All
 }
