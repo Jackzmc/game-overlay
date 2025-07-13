@@ -2,32 +2,52 @@ use axum::extract::ws::{Message, WebSocket};
 use std::net::SocketAddr;
 use log::{debug, error, trace, warn};
 use futures_util::{SinkExt, StreamExt};
-use overlay_manager::{InitConnectionReqPayload, InitConnectionResPayload};
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::UnboundedReceiverStream;
-use overlay_common::{requests, AuthFailure};
+use overlay_common::{requests, AuthFailure, AuthPayload};
 use overlay_common::events::ServerEvent;
 use std::ops::Deref;
 use std::time::Duration;
+use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::UnboundedSender;
-use overlay_common::requests::ServerRequest;
+use overlay_common::requests::{ServerRequest};
 use crate::manager::{Client, Manager, Server};
 use crate::{CLIENT_AUTH_TIMEOUT, PUBLIC_URL};
+use crate::web::AppError;
 
-pub async fn init_connection(mut ws: WebSocket, addr: SocketAddr, manager: Manager) {
-    debug!("init_connection addr={:?}", addr);
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+/// Any response from manager
+pub enum WSResponse {
+    /// An error occurred processing auth
+    Error { error: AuthFailure },
+    /// Client has started an oauth2 login session
+    PendingLogin { url: String },
+    /// A bad or malformed request was made
+    InvalidRequest { message: Option<String> }
+}
+
+impl Into<Message> for WSResponse {
+    fn into(self) -> Message {
+        Message::Text(serde_json::to_string(&self).unwrap())
+    }
+}
+
+/// Sets up a task and waits for the first message to be received
+pub async fn setup_conn(mut ws: WebSocket, addr: SocketAddr, manager: Manager) {
+    debug!("setup_conn addr={:?}", addr);
     // let (mut conn_tx, mut conn_rx) = ws.split();
     // Wait for the first initial connection
     tokio::task::spawn(async move {
         if let Some(Ok(message)) = ws.next().await {
             trace!("incoming msg");
-            match serde_json::from_str::<InitConnectionReqPayload>(&message.into_text().unwrap()) {
+            match serde_json::from_str::<AuthPayload>(&message.into_text().unwrap()) {
                 Ok(json) => {
                     login_connection(ws, manager, json, addr).await;
                 },
                 Err(err) => {
                     warn!("invalid payload: {}", err);
-                    send(&mut ws, InitConnectionResPayload::InvalidPayload { message: Some(err.to_string()) }).await;
+                    send_err(&mut ws, AuthFailure::InternalError { message: Some(err.to_string()) }).await;
                     ws.close().await.ok();
                 }
             }
@@ -36,35 +56,36 @@ pub async fn init_connection(mut ws: WebSocket, addr: SocketAddr, manager: Manag
 
 }
 
-async fn login_connection(mut ws: WebSocket, manager: Manager, req: InitConnectionReqPayload, addr: SocketAddr) {
+/// Called with the auth payload, handles authenticating
+async fn login_connection(mut ws: WebSocket, manager: Manager, req: AuthPayload, addr: SocketAddr) {
     let (tx, rx) = mpsc::unbounded_channel();
     let mut rx = UnboundedReceiverStream::new(rx);
     let mut mngr = manager.lock().await;
     // TODO: add timeout, to remove temp clients
     match req {
-        InitConnectionReqPayload::Client { auth_token} => {
+        AuthPayload::Client { auth_token} => {
             debug!("login_connection - creating client");
             match mngr.start_client(addr, tx.clone()) {
                 Ok((client, id)) => {
                     if let Some(token) = auth_token {
                         if let Err(err) = mngr.authorize_client_token(&id, token).await {
                             // Cleanup ID
-                            send(&mut ws, InitConnectionResPayload::AuthError(AuthFailure::General { message: err.to_string() })).await;
+                            send_err(&mut ws, AuthFailure::InternalError{ message: Some(err.to_string()) }).await;
                             mngr.remove_client(&id);
                             return;
                         }
                     } else {
-                        send(&mut ws, InitConnectionResPayload::PendingClientLogin { url: format!("{}/auth/login?id={id}", PUBLIC_URL.deref()) }).await;
+                        send(&mut ws, WSResponse::PendingLogin { url: format!("{}/auth/login?id={id}", PUBLIC_URL.deref()) }).await;
                     }
                     drop(mngr);
                     init_client_connection(ws, (tx, rx), manager, client).await;
                 },
-                Err(e) => {
-                    send(&mut ws, InitConnectionResPayload::AuthError(e)).await;
+                Err(err) => {
+                    send_err(&mut ws,err).await;
                 }
             }
         }
-        InitConnectionReqPayload::Server { auth_token } => {
+        AuthPayload::Server { auth_token } => {
             debug!("login_connection - authorizing server");
             match mngr.try_authorize_server(addr, tx.clone(), auth_token).await {
                 Ok(server) => {
@@ -76,9 +97,9 @@ async fn login_connection(mut ws: WebSocket, manager: Manager, req: InitConnecti
                     debug!("server authorized");
                     init_server_connection(ws, (tx, rx), manager, server).await;
                 },
-                Err(e) => {
-                    trace!("Server auth failed: {}", e);
-                    send(&mut ws, InitConnectionResPayload::AuthError(e)).await;
+                Err(err) => {
+                    trace!("Server auth failed: {}", err);
+                    send_err(&mut ws, err).await;
                 }
             }
         }
@@ -86,23 +107,11 @@ async fn login_connection(mut ws: WebSocket, manager: Manager, req: InitConnecti
     // Socket exiting
 }
 
-/// Continuously checks client to see if it has authorized, sleeping in between
-pub async fn wait_for_client_auth(client: Client) {
-    loop {
-        let client = client.lock().await;
-        if client.is_authorized() {
-            break;
-        }
-        tokio::time::sleep(Duration::from_secs(5)).await;
-        tokio::task::yield_now().await;
-    }
-}
-
 async fn init_client_connection(mut ws: WebSocket, (mut tx, mut rx): (UnboundedSender<Message>, UnboundedReceiverStream<Message>), manager: Manager, client: Client) {
     trace!("entering client read loop");
     // Timeout if client doesn't authorize within CLIENT_AUTH_TIMEOUT
     if let Err(_) = tokio::time::timeout(CLIENT_AUTH_TIMEOUT, wait_for_client_auth(client.clone())).await {
-        send(&mut ws, InitConnectionResPayload::AuthError(AuthFailure::Timeout)).await;
+        send_err(&mut ws, AuthFailure::Timeout).await;
     } else {
         let (mut ws_tx, mut ws_rx) = ws.split();
         let client = client.clone();
@@ -118,8 +127,8 @@ async fn init_client_connection(mut ws: WebSocket, (mut tx, mut rx): (UnboundedS
                             error!("on_client_event error: {:?}", err);
                         }
                     },
-                    Err(e) => {
-                        tx.send(InitConnectionResPayload::InvalidPayload { message: Some(e.to_string()) }.into()).ok();
+                    Err(err) => {
+                        tx.send(WSResponse::InvalidRequest { message: Some(err.to_string()) }.into()).ok();
                     }
                 }
             }
@@ -140,6 +149,18 @@ async fn init_client_connection(mut ws: WebSocket, (mut tx, mut rx): (UnboundedS
     manager.lock().await.remove_client(&id);
 }
 
+/// Continuously checks client to see if it has authorized, sleeping in between
+pub async fn wait_for_client_auth(client: Client) {
+    loop {
+        let client = client.lock().await;
+        if client.is_authorized() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_secs(5)).await;
+        tokio::task::yield_now().await;
+    }
+}
+
 async fn init_server_connection(mut ws: WebSocket, (mut tx, mut rx): (UnboundedSender<Message>, UnboundedReceiverStream<Message>), manager: Manager, server: Server) {
     trace!("entering server read loop");
     let (mut ws_tx, mut ws_rx) = ws.split();
@@ -158,7 +179,7 @@ async fn init_server_connection(mut ws: WebSocket, (mut tx, mut rx): (UnboundedS
                     }
                     Err(e) => {
                         trace!("server: invalid payload {}", e);
-                        tx.send(InitConnectionResPayload::InvalidPayload { message: Some(e.to_string()) }.into()).ok();
+                        tx.send(WSResponse::InvalidRequest { message: Some(e.to_string()) }.into()).ok();
                     }
                 }
             }
@@ -179,12 +200,14 @@ async fn init_server_connection(mut ws: WebSocket, (mut tx, mut rx): (UnboundedS
     drop(server);
 }
 
-async fn send(ws: &mut WebSocket, response: InitConnectionResPayload) -> bool {
+async fn send(ws: &mut WebSocket, response: WSResponse) -> bool {
     match serde_json::to_string(&response) {
         Ok(json) => {
             ws.send(Message::Text(json)).await.is_ok()
         },
         Err(e) => false
     }
-
+}
+async fn send_err(ws: &mut WebSocket, error: AuthFailure) -> bool {
+    send(ws, WSResponse::Error { error }).await
 }

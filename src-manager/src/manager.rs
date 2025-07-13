@@ -16,8 +16,7 @@ use steamid_ng::{SteamID, SteamIDError};
 use tokio::sync::mpsc::UnboundedSender;
 use overlay_common::events::{ClientEvent, ServerEvent};
 use overlay_common::requests::{ClientRequest, ServerRequest};
-use overlay_common::TargetPlayer;
-use overlay_manager::{AuthFailure};
+use overlay_common::{AuthFailure, TargetSelection};
 use crate::client::{ClientInstance};
 use crate::{JWT_SECRET_KEY};
 use crate::server::{ServerInstance};
@@ -303,18 +302,18 @@ impl ManagerInstance {
     }
 
     /// Converts a selection to a list of steamids
-    fn selection_to_list(&mut self, all_players: &Vec<SteamID>, selection: &TargetPlayer) -> Result<Vec<SteamID>, SteamIDError> {
+    fn selection_to_list(&mut self, all_players: &Vec<SteamID>, selection: &TargetSelection) -> Result<Vec<SteamID>, SteamIDError> {
         match selection {
-            TargetPlayer::Single(steamid) => {
+            TargetSelection::SteamID(steamid) => {
                 let steamid = SteamID::from_steam2(steamid)?;
                 Ok(vec![steamid])
             }
-            TargetPlayer::Many(steamids) => steamids.into_iter().map(|s| SteamID::from_steam2(&s)).collect(),
-            TargetPlayer::All => Ok(all_players.clone()),
+            TargetSelection::SteamIDs(steamids) => steamids.into_iter().map(|s| SteamID::from_steam2(&s)).collect(),
+            TargetSelection::All => Ok(all_players.clone()),
         }
     }
 
-    async fn perform_selection<F>(&mut self, server: &Server, selection: &TargetPlayer, mut closure: F) -> Result<(), SteamIDError>
+    async fn perform_selection<F>(&mut self, server: &Server, selection: &TargetSelection, mut closure: F) -> Result<(), SteamIDError>
         where F: FnMut(MutexGuard<ClientInstance>) -> ()
     {
         let server = server.lock().await;

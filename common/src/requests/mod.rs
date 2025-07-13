@@ -1,12 +1,15 @@
 use serde::{Serialize, Deserialize};
-use crate::{CreateElementRegister, ElementOptions, ElementState, SteamUser, TargetPlayer, UITemplate, UpdateElementRegister};
+use crate::{ElementOptions, ElementState, SteamUser, TargetSelection, UITemplate};
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(tag = "type")]
 #[serde(rename_all = "snake_case")]
 /// Messages that are being received from the client (Client -> Manager)
 pub enum ClientRequest {
-    Action { command: String, namespace: String, input: String, instance_id: String }
+
+
+    /// Perform an action (command) on server
+    Action { command: String, namespace: String, input: String, instance_id: String },
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -34,9 +37,9 @@ pub enum ServerRequest {
     PlayerLeft { steamid: String },
     GameState {}, // TODO: implement
     /// Creates a new element for a client
-    RequestElement { target: TargetPlayer, elem_id: String, template_id: String, state: ElementState, options: Option<ElementOptions> },
+    RequestElement { target: TargetSelection, elem_id: String, template_id: String, state: ElementState, options: Option<ElementOptions> },
     /// Updates an element by id, with optional new options (overwrites existing)
-    UpdateElement { target: TargetPlayer, elem_id: String, state: ElementState, new_options: Option<ElementOptions> },
+    UpdateElement { target: TargetSelection, elem_id: String, state: ElementState, new_options: Option<ElementOptions> },
     ChangeAudioState { steamids: Option<Vec<String>> , source: String, state: u8, volume: Option<f32>, start_time: Option<f32>, repeat: Option<bool> }
 }
 

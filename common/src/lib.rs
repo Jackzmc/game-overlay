@@ -10,13 +10,6 @@ pub mod requests;
 pub mod game;
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
-pub struct CreateElementRegister {
-    pub namespace: String,
-    pub instance_id: String,
-    pub template_id: String,
-    pub options: Option<ElementOptions>
-}
-#[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct ElementOptions {
     /// If set, after N seconds after element started on client, it will delete itself
     /// Default: None
@@ -24,15 +17,6 @@ pub struct ElementOptions {
     /// Should element be visible to client on start?
     /// Default: false
     pub start_visible: Option<bool>
-}
-#[derive(Debug, Deserialize, Serialize, Clone)]
-pub struct UpdateElementRegister {
-    pub namespace: String,
-    pub instance_id: String,
-    /// Update visibility, if not set, value remains unchanged
-    pub visible: Option<bool>,
-    /// Variables. Replaces all variables on client
-    pub variables: Value
 }
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(rename_all = "snake_case")]
@@ -43,7 +27,7 @@ pub enum ClientSelection {
     /// Apply to multiple steamids
     Steamids { steamids: Vec<String> },
     /// apply to all clients connected to server
-    All {  }
+    All
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -58,21 +42,24 @@ pub struct UITemplate {
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 #[serde(tag = "type")]
-pub enum InitConnectionReqPayload {
+pub enum AuthPayload {
     Client { auth_token: Option<String> },
     Server { auth_token: String }
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-#[serde(tag = "reason")]
+#[serde(tag = "code")]
+/// Represents an authentication error
 pub enum AuthFailure {
     InvalidAuthToken { message: Option<String> },
+    InternalError { message: Option<String> },
     Unknown,
     General { message: String },
     Timeout,
     ObjectNotFound
 }
+
 impl Error for AuthFailure {}
 impl fmt::Display for AuthFailure {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -130,10 +117,12 @@ pub struct SteamUser {
 pub type ElementState = Value;
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
-pub enum TargetPlayer {
+#[serde(rename_all = "snake_case")]
+#[serde(untagged)]
+pub enum TargetSelection {
     /// A single player
-    Single(String),
-    Many(Vec<String>),
+    SteamID(String),
+    SteamIDs(Vec<String>),
     /// All players
     All
 }

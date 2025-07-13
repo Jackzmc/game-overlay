@@ -13,7 +13,7 @@ use serde_json::json;
 use steamid_ng::SteamID;
 use crate::{AppState, PUBLIC_URL};
 use crate::web::{AppError, OpenIdCallback};
-use crate::web::websocket::init_connection;
+use crate::web::websocket::setup_conn;
 
 pub(crate) fn get_router() -> Router<Arc<AppState>> {
    Router::new()
@@ -30,7 +30,7 @@ async fn route_socket(
     State(state): State<Arc<AppState>>
 ) -> impl IntoResponse {
     let manager = state.manager.clone();
-    ws.on_upgrade(move |socket: WebSocket| init_connection(socket, addr, manager))
+    ws.on_upgrade(move |socket: WebSocket| setup_conn(socket, addr, manager))
 }
 
 

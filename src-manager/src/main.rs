@@ -1,7 +1,6 @@
 mod client;
 mod server;
 mod manager;
-mod util;
 mod steam;
 
 use axum_template::engine::Engine;
