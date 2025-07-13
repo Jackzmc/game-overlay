@@ -19,7 +19,7 @@ use overlay_common::requests::{ClientRequest, ServerRequest};
 use overlay_common::TargetPlayer;
 use overlay_manager::{AuthFailure};
 use crate::client::{ClientInstance};
-use crate::{AppError, JWT_SECRET_KEY};
+use crate::{JWT_SECRET_KEY};
 use crate::server::{ServerInstance};
 use crate::steam::{SteamClient};
 

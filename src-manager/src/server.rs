@@ -102,11 +102,4 @@ impl ServerInstance {
     }
 }
 
-#[derive(FromRow)]
-pub struct TemplateEntry {
-    pub namespace: String,
-    pub id: String,
-    pub data: String
-}
-
 pub struct ClientNotAuthorized;
