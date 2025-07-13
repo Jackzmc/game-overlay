@@ -1,16 +1,23 @@
 [workspace]
 resolver = "3"
 members = [
-    "src-tauri",
-    "src-manager"
-#    "src-overlay"
-, "common"]
-exclude = ["src-overlay"]
+    "common",
+    "src-manager",
+    "src-overlay"
+]
+#exclude = ["src-overlay"]
 
 [workspace.dependencies]
 serde = { version = "1.0.219", features = ["derive"] }
 serde_json = "1.0.140"
-
+overlay_common = { version = "0.1", path = './common' }
+tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
+tracing = { version = "0.1", default-features = false }
+dotenvy = "0.15.7"
+uuid = "1.17.0"
+tokio = {  version = "1.46.1", features = ["full"] }
+tokio-tungstenite = "0.21.0"
+tungstenite = "0.21.0"
 
 #[workspace.package]
 #edition = "2021"

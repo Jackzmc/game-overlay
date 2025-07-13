@@ -45,7 +45,10 @@ use axum_template::{RenderHtml, TemplateEngine};
 use dotenvy::dotenv;
 use sqlx::{MySqlPool, Pool};
 use tokio::time::timeout;
-use overlay_manager::{AuthFailure, ClientOutgoingEvent, InitConnectionReqPayload, InitConnectionResPayload, ServerOutgoingEvent, ServerIncomingRequest, ClientIncomingRequest, UITemplate};
+use overlay_common::{events, requests};
+use overlay_common::events::ServerEvent;
+use overlay_common::requests::ServerRequest;
+use overlay_manager::{AuthFailure, InitConnectionReqPayload, InitConnectionResPayload};
 use crate::server::TemplateEntry;
 
 type QueryMap = HashMap<String, String>;
@@ -343,7 +346,7 @@ async fn login_connection(mut ws: WebSocket, manager: Manager, req: InitConnecti
                     drop(mngr);
                     {
                         let server_inst = server.lock().await;
-                        server_inst.send_request(&ServerIncomingRequest::Authorized).unwrap();
+                        server_inst.send_event(&ServerEvent::Authorized).unwrap();
                     }
                     debug!("server authorized");
                     init_server_connection(ws, (tx, rx), manager, server).await;
@@ -381,11 +384,11 @@ async fn init_client_connection(mut ws: WebSocket, (mut tx, mut rx): (UnboundedS
         // Read incoming messages from websocket:
         tokio::task::spawn(async move {
             while let Some(Ok(message)) = ws_rx.next().await {
-                match serde_json::from_str::<ClientOutgoingEvent>(&message.into_text().unwrap()) {
+                match serde_json::from_str::<requests::ClientRequest>(&message.into_text().unwrap()) {
                     Ok(event) => {
                         debug!("got message from client {:?}", event);
                         let mut manager = manager.lock().await;
-                        if let Err(err) = manager.on_client_event(&event, client.clone()).await {
+                        if let Err(err) = manager.on_client_request(&event, client.clone()).await {
                             error!("on_client_event error: {:?}", err);
                         }
                     },
@@ -418,14 +421,14 @@ async fn init_server_connection(mut ws: WebSocket, (mut tx, mut rx): (UnboundedS
         let manager = manager.clone();
         tokio::task::spawn(async move {
             while let Some(Ok(message)) = ws_rx.next().await {
-                match serde_json::from_str::<ServerOutgoingEvent>(&message.into_text().unwrap()) {
-                    Ok(event) => {
-                        debug!("got message from server {:?}", event);
+                match serde_json::from_str::<ServerRequest>(&message.into_text().unwrap()) {
+                    Ok(request) => {
+                        debug!("got message from server {:?}", request);
                         let mut manager = manager.lock().await;
-                        if let Err(err) = manager.on_server_event(&event, server.clone()).await {
-                            error!("on_server_event error: {:?}", err);
+                        if let Err(err) = manager.on_server_request(&request, server.clone()).await {
+                            error!("on_server_request error: {:?}", err);
                         }
-                    },
+                    }
                     Err(e) => {
                         trace!("server: invalid payload {}", e);
                         tx.send(InitConnectionResPayload::InvalidPayload { message: Some(e.to_string()) }.into()).ok();

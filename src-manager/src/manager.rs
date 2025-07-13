@@ -14,7 +14,9 @@ use serde::{Deserialize, Serialize};
 use sqlx::{MySqlPool, Pool};
 use steamid_ng::{SteamID, SteamIDError};
 use tokio::sync::mpsc::UnboundedSender;
-use overlay_manager::{AuthFailure, ClientOutgoingEvent, ServerOutgoingEvent, ClientIncomingRequest, ServerIncomingRequest, ClientSelection};
+use overlay_common::events::{ClientEvent, ServerEvent};
+use overlay_common::requests::{ClientRequest, ServerRequest};
+use overlay_manager::{AuthFailure};
 use crate::client::{ClientInstance};
 use crate::{AppError, JWT_SECRET_KEY};
 use crate::server::{ServerInstance};
@@ -114,7 +116,7 @@ impl ManagerInstance {
         let mut client = client.lock().await;
         client._set_steamid(steamid);
         let token = client.generate_auth_token().map_err(|e| AuthFailure::General { message: e })?;
-        client.send_request(&ClientIncomingRequest::Authorized {
+        client.send_event(&ClientEvent::Authorized {
             steamid2: steamid.steam2(),
             auth_token: token,
             user
@@ -192,13 +194,13 @@ impl ManagerInstance {
     pub fn get_server(&self, id: &str) -> Option<Server> {
         self.servers.get(id).cloned()
     }
-    pub async fn on_client_event(&mut self, event: &ClientOutgoingEvent, client: Client) -> Result<(), RequestError>  {
+    pub async fn on_client_request(&mut self, event: &ClientRequest, client: Client) -> Result<(), RequestError>  {
         match event {
-            ClientOutgoingEvent::Action { command, namespace, input, instance_id } => {
+            ClientRequest::Action { command, namespace, input, instance_id } => {
                 let client = client.lock().await;
                 if let Some(server) = client.connected_server() {
                     let server = server.lock().await;
-                    server.send_request(&ServerIncomingRequest::Action {
+                    server.send_event(&ServerEvent::Action {
                         steamid2: client.steamid2().unwrap(),
                         command: command.to_string(),
                         namespace: namespace.to_string(),
@@ -211,9 +213,9 @@ impl ManagerInstance {
         }
         Ok(())
     }
-    pub async fn on_server_event(&mut self, event: &ServerOutgoingEvent, server: Server) -> Result<(), RequestError> {
+    pub async fn on_server_request(&mut self, event: &ServerRequest, server: Server) -> Result<(), RequestError> {
         match event {
-            ServerOutgoingEvent::PlayerJoined { steamid} => {
+            ServerRequest::PlayerJoined { steamid} => {
                 let steamid = SteamID::from_steam2(steamid).map_err(|_| RequestError::InvalidData)?;
                 // If there is no client with that steamid, ignore it, they aren't using overlay
                 if let Some(client) = self.find_client_by_steamid(steamid) {
@@ -225,7 +227,7 @@ impl ManagerInstance {
 
                     let mut client = client.lock().await;
                     client._set_server(Some(server.clone()));
-                    client.send_request(&ClientIncomingRequest::JoinedServer {
+                    client.send_event(&ClientEvent::JoinedServer {
                         server_id,
                         server_name: "[not implemented]".to_string(),
                         server_ip
@@ -234,13 +236,13 @@ impl ManagerInstance {
                     warn!("PlayerJoined but player was not found: {}", steamid.steam2());
                 }
             },
-            ServerOutgoingEvent::PlayerLeft { steamid} => {
+            ServerRequest::PlayerLeft { steamid} => {
                 let steamid = SteamID::from_steam2(steamid).map_err(|_| RequestError::InvalidData)?;
                 // If there is no client with that steamid, ignore it, they aren't using overlay
                 if let Some(client) = self.find_client_by_steamid(steamid) {
                     let mut client = client.lock().await;
                     client._set_server(None);
-                    client.send_request(&ClientIncomingRequest::LeftServer)?;
+                    client.send_event(&ClientEvent::LeftServer)?;
                 }
                 let mut server = server.lock().await;
                 server.remove_client(&steamid);
@@ -266,21 +268,21 @@ impl ManagerInstance {
             //     }
             //     debug!("forwarded tmp ui to {} clients", steamids.len());
             // },
-            ServerOutgoingEvent::CreateElement { steamids, registry } => {
+            ServerRequest::CreateElement { steamids, registry } => {
                 trace!("forwarding create element {} template {}{}", registry.instance_id, registry.namespace, registry.template_id);
                 self.perform_selection(&server, steamids, |client| {
                     debug!("forwarding create ui to client {}", client.id());
-                    client.send_request(&ClientIncomingRequest::CreateElement {
+                    client.send_event(&ClientEvent::CreateElement {
                         registry: registry.clone()
                     }).unwrap();
                 });
                 trace!("create element - done");
             },
-            ServerOutgoingEvent::UpdateElement { steamids, registry } => {
+            ServerRequest::UpdateElement { steamids, registry } => {
                 trace!("forwarding update element {}", registry.instance_id);
                 self.perform_selection(&server, steamids, |client| {
                     debug!("forwarding update ui to client {}", client.id());
-                    client.send_request(&ClientIncomingRequest::UpdateElement {
+                    client.send_event(&ClientEvent::UpdateElement {
                         registry: registry.clone()
                     }).unwrap();
                 });

@@ -10,7 +10,8 @@ use sqlx::{Executor, FromRow, MySqlPool, query};
 use steamid_ng::SteamID;
 use tokio::sync::mpsc::UnboundedSender;
 use uuid::Uuid;
-use overlay_manager::{ClientIncomingRequest, ServerIncomingRequest, UITemplate};
+use overlay_common::events::{ClientEvent, ServerEvent};
+use overlay_common::requests::{ClientRequest, ServerRequest};
 use crate::manager::{Client, RequestError};
 use crate::POOL;
 
@@ -52,8 +53,8 @@ impl ServerInstance {
     }
     pub fn addr(&self) -> String { self.addr.ip().to_string() }
 
-    pub fn send_request(&self, request: &ServerIncomingRequest) -> Result<(), RequestError> {
-        let json = serde_json::to_string(request).map_err(|_| RequestError::RequestNotSerializable)?;
+    pub fn send_event(&self, event: &ServerEvent) -> Result<(), RequestError> {
+        let json = serde_json::to_string(event).map_err(|_| RequestError::RequestNotSerializable)?;
         self.tx.send(Message::Text(json)).map_err(|_| ()).map_err(|_| RequestError::Disconnected)
     }
 
@@ -76,17 +77,12 @@ impl ServerInstance {
         debug!("{}: remove_client {}", self.id, id.steam2());
         self.clients.remove(id).is_some()
     }
-    fn _insert_template(&mut self, template: TemplateEntry) -> Result<UITemplate, String> {
-        let json: UITemplate =  serde_json::from_str(&template.data).map_err(|e| e.to_string())?;
-        self.template_ids.push(template.id.clone());
-        Ok(json)
-    }
 
     pub async fn notify_disconnect(&mut self) {
         for client in self.clients() {
             let mut client = client.lock().await;
             client._set_server(None);
-            client.send_request(&ClientIncomingRequest::LeftServer).unwrap();
+            client.send_event(&ClientEvent::LeftServer).unwrap();
         }
     }
 }

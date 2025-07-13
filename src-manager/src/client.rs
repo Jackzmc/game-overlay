@@ -8,7 +8,8 @@ use sha2::digest::KeyInit;
 use steamid_ng::SteamID;
 use tokio::sync::mpsc::UnboundedSender;
 use uuid::Uuid;
-use overlay_manager::ClientIncomingRequest;
+use overlay_common::events::ClientEvent;
+use overlay_common::requests::ClientRequest;
 use crate::JWT_SECRET_KEY;
 use crate::manager::{RequestError, Server};
 
@@ -49,8 +50,8 @@ impl ClientInstance {
         self.steamid.is_some()
     }
 
-    pub fn send_request(&self, request: &ClientIncomingRequest) -> Result<(), RequestError> {
-        let json = serde_json::to_string(request).map_err(|_| RequestError::RequestNotSerializable)?;
+    pub fn send_event(&self, event: &ClientEvent) -> Result<(), RequestError> {
+        let json = serde_json::to_string(event).map_err(|_| RequestError::RequestNotSerializable)?;
         self.tx.send(Message::Text(json)).map_err(|_| ()).map_err(|_| RequestError::Disconnected)
     }
 
