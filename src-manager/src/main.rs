@@ -43,7 +43,7 @@ use axum::http::{HeaderMap, StatusCode};
 use axum::response::{AppendHeaders, IntoResponse};
 use axum_template::{RenderHtml, TemplateEngine};
 use dotenvy::dotenv;
-use sqlx::MySqlPool;
+use sqlx::{MySqlPool, Pool};
 use tokio::time::timeout;
 use overlay_manager::{AuthFailure, ClientOutgoingEvent, InitConnectionReqPayload, InitConnectionResPayload, ServerOutgoingEvent, ServerIncomingRequest, ClientIncomingRequest, UITemplate};
 use crate::server::TemplateEntry;
@@ -99,14 +99,14 @@ impl AppState {
 async fn main() {
     dotenv().unwrap();
     if std::env::var("RUST_LOG").is_err() {
-        std::env::set_var("RUST_LOG", format!("warn,{}=info", env!("CARGO_PKG_NAME")));
+        // TODO: use same logger as overlay. this is safe, before any threads created:
+        unsafe { std::env::set_var("RUST_LOG", format!("warn,{}=info", env!("CARGO_PKG_NAME"))); }
     }
     if env::var("STEAM_DONT_VALIDATE").is_ok() {
         warn!("Env STEAM_DONT_VALIDATE is set, validation of steam logins will not take place");
     }
     pretty_env_logger::init();
-    let pool = MySqlPool::connect(&env::var("DATABASE_URL").expect("missing DATABASE_URL")).await.expect("mysql connection failed");
-    POOL.set(pool).unwrap();
+    setup_pool().await;
 
     let state = AppState::new().await;
     let assets_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("static");
@@ -116,8 +116,6 @@ async fn main() {
         .route("/socket", get(route_socket))
         .route("/auth/login", get(route_steam_login))
         .route("/auth/callback", get(route_steam_callback))
-        .route("/templates/:namespace/:id", get(route_get_template))
-        .route("/templates/:namespace/:id/html", get(route_get_template_html))
         .route("/manage", get(route_manage_ui))
         .with_state(Arc::new(state));
 
@@ -125,6 +123,21 @@ async fn main() {
     info!("listening on {}", LISTEN_ADDRESS.to_string());
     info!("public url: {}", PUBLIC_URL.deref());
     axum::serve(listener, app.into_make_service_with_connect_info::<SocketAddr>()).await.unwrap();
+}
+
+async fn setup_pool() {
+    let pool = async {
+        let url = env::var("DATABASE_URL").map_err(|_| "DATABASE_URL is not set".to_owned())?;
+        MySqlPool::connect(&url).await.map_err(|e| e.to_string())
+    };
+    let pool = match pool.await {
+        Ok(pool) => pool,
+        Err(e) => {
+            error!("{}", e);
+            std::process::exit(1);
+        }
+    };
+    POOL.set(pool).unwrap();
 }
 
 #[derive(Serialize)]
@@ -220,50 +233,6 @@ async fn route_steam_callback(
     Ok(RenderHtml("login_success", state.engine.clone(), json!({})))
 }
 
-async fn route_get_template(
-    Path((namespace, id)): Path<(String, String)>,
-    State(state): State<Arc<AppState>>,
-) -> Result<impl IntoResponse, AppError> {
-    let pool = POOL.get().unwrap();
-    // TODO: cache?
-    let row = sqlx::query_as!(TemplateEntry, "SELECT e.namespace, e.id, e.data FROM overlay_templates e WHERE namespace = ? AND id = ?", namespace, id)
-        .fetch_optional(pool)
-        .await
-        .map_err(|e| AppError::DatabaseError { message: e.to_string() })?;
-    if let Some(row) = row {
-        // We could use Json() but its already stringified, so we avoid unnecessarily converting to JSON and back:
-        Ok(([(axum::http::header::CONTENT_TYPE, "application/json")], row.data))
-        // Ok(Json(row.data))
-    } else {
-        Err(AppError::EntityNotFound { message: format!("No template with the id {id} was found in the {namespace} namespace").to_string() })
-    }
-}
-async fn route_get_template_html(
-    Path((namespace, id)): Path<(String, String)>,
-    State(state): State<Arc<AppState>>,
-) -> Result<impl IntoResponse, AppError> {
-    let pool = POOL.get().unwrap();
-    // TODO: cache?
-    let row = sqlx::query_as!(TemplateEntry, "SELECT e.namespace, e.id, e.data FROM overlay_templates e WHERE namespace = ? AND id = ?", namespace, id)
-        .fetch_optional(pool)
-        .await
-        .map_err(|e| AppError::DatabaseError { message: e.to_string() })?;
-    if let Some(row) = row {
-        match from_str::<Value>(&row.data) {
-            Ok(json) => {
-                let template_str = json["hbTemplate"].as_str().unwrap().to_string();
-                Ok(([(axum::http::header::CONTENT_TYPE, "text/plain")], template_str))
-            },
-            Err(e) => {
-                Err(AppError::DatabaseError { message: format!("Invalid json data in template: {}", e).to_string() })
-            }
-        }
-        // We could use Json() but its already stringified, so we avoid unnecessarily converting to JSON and back:
-        // Ok(Json(row.data))
-    } else {
-        Err(AppError::EntityNotFound { message: format!("No template with the id {id} was found in the {namespace} namespace").to_string() })
-    }
-}
 
 async fn route_manage_ui(
     State(state): State<Arc<AppState>>,

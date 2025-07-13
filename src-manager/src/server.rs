@@ -76,30 +76,6 @@ impl ServerInstance {
         debug!("{}: remove_client {}", self.id, id.steam2());
         self.clients.remove(id).is_some()
     }
-
-    // Grabs an element from cache or fetches it
-//     pub async fn get_element(&mut self, id: &str, bypass_cache: bool) -> Result<Option<&UIElement>, String> {
-//         if !bypass_cache && self.ui_elements.contains_key(id) {
-//             Ok(Some(self.ui_elements.get(id).unwrap()))
-//         } else {
-//             let pool = POOL.get().unwrap();
-//             let row = query!("SELECT e.id, e.data FROM overlay_elements_servers es LEFT JOIN overlay_elements e ON e.id = es.element_id WHERE es.namespace = ? AND es.server_id = ? LIMIT 1", self.namespace, );
-//             Ok(None)
-// //             let row = sqlx::query_as::<_, Option<Element>>("SELECT e.id, e.data FROM overlay_elements_servers es
-// //     LEFT JOIN overlay_elements e ON e.id = es.element_id
-// // WHERE es.namespace = ? AND es.server_id = ? LIMIT 1")
-// //                 .bind(&self.namespace)
-// //                 .bind(&self.id)
-// //                 .fetch_one(pool).await
-// //                 .map_err(|e| e.to_string())?;
-// //             row
-// //                 .map(|row| {
-// //                     Ok(self._insert_element(row))
-// //                 })
-// //                 .or_else(|| Ok(None))
-//         }
-//     }
-
     fn _insert_template(&mut self, template: TemplateEntry) -> Result<UITemplate, String> {
         let json: UITemplate =  serde_json::from_str(&template.data).map_err(|e| e.to_string())?;
         self.template_ids.push(template.id.clone());
@@ -112,32 +88,6 @@ impl ServerInstance {
             client._set_server(None);
             client.send_request(&ClientIncomingRequest::LeftServer).unwrap();
         }
-    }
-
-    pub async fn fetch_element_ids(&mut self) -> Result<Vec<String>, String> {
-        if let Some(last_fetch) = self.elements_fetch_time {
-            if SystemTime::now().duration_since(last_fetch).unwrap().as_secs() < ELEMENT_CACHE_TIME {
-                return Ok(self.template_ids.clone());
-            }
-        }
-        let pool = POOL.get().unwrap();
-        let rows: Vec<TemplateEntry> = sqlx::query!("SELECT e.namespace, e.id, e.data FROM overlay_elements_servers es
-    LEFT JOIN overlay_templates e ON e.id = es.element_id
-WHERE es.namespace = ? AND es.server_id = ?", self.namespace, self.id)
-            .fetch_all(pool).await
-            .map_err(|e| e.to_string())?
-            .into_iter()
-            .map(|e| TemplateEntry {
-                namespace: e.namespace.unwrap(),
-                id: e.id.unwrap(),
-                data: e.data.unwrap(),
-            })
-            .collect();
-        for row in &rows {
-            self.template_ids.push(row.id.clone());
-        }
-        Ok(rows.iter().map(|r| r.id.to_string()).collect())
-
     }
 }
 
