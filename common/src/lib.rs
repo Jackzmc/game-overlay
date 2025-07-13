@@ -7,7 +7,7 @@ use serde_json::Value;
 
 pub mod events;
 pub mod requests;
-mod game;
+pub mod game;
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct CreateElementRegister {

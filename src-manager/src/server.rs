@@ -11,6 +11,7 @@ use steamid_ng::SteamID;
 use tokio::sync::mpsc::UnboundedSender;
 use uuid::Uuid;
 use overlay_common::events::{ClientEvent, ServerEvent};
+use overlay_common::game::ServerInfo;
 use overlay_common::requests::{ClientRequest, ServerRequest};
 use crate::manager::{Client, RequestError};
 use crate::POOL;
@@ -21,8 +22,9 @@ pub struct ServerInstance {
     id: String,
     clients: HashMap<SteamID, Client>,
     addr: SocketAddr,
-    template_ids: Vec<String>,
-    elements_fetch_time: Option<SystemTime>
+    // TODO: ugh
+    // teams: Vec<TeamConfig>
+    // players: Vec<PlayerInfo>
     // db: MySqlPool
 }
 
@@ -38,8 +40,6 @@ impl ServerInstance {
             namespace,
             id,
             clients: HashMap::new(),
-            template_ids: Vec::new(),
-            elements_fetch_time: None
         }
     }
     pub fn namespace(&self) -> &str { &self.namespace }
@@ -83,6 +83,21 @@ impl ServerInstance {
             let mut client = client.lock().await;
             client._set_server(None);
             client.send_event(&ClientEvent::LeftServer).unwrap();
+        }
+    }
+
+    pub fn info(&self) -> ServerInfo {
+        ServerInfo {
+            id: self.id.clone(),
+            // TODO: impl self.name
+            name: format!("{} {}", self.id.clone().chars().take(4).collect::<String>(), self.addr),
+            ip_addr: self.addr,
+            // TODO: impl
+            game_type: 0,
+            // TODO: impl
+            players: vec![],
+            // TODO: impl
+            teams: vec![],
         }
     }
 }

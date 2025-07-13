@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 /// The index of a player's team
-pub struct PlayerTeam(pub(crate) u8);
+pub struct PlayerTeam(pub u8);
 #[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
 /// Determine how team should be shown in UI
 pub enum TeamShow {
@@ -16,7 +16,7 @@ pub enum TeamShow {
     Open
 }
 #[derive(Serialize, Deserialize, Debug, Clone)]
-pub(crate) struct TeamConfig {
+pub struct TeamConfig {
     /// The displayed name of team
     pub name: String,
     pub show: TeamShow

@@ -222,17 +222,14 @@ impl ManagerInstance {
                 if let Some(client) = self.find_client_by_steamid(steamid) {
                     let mut server_inst = server.lock().await;
                     server_inst.add_client(client.clone()).await;
-                    let server_id = server_inst.id().to_string();
-                    let server_ip = server_inst.addr();
+                    let server_info = server_inst.info();
                     drop(server_inst);
 
                     let mut client = client.lock().await;
                     client._set_server(Some(server.clone()));
-                    client.send_event(&ClientEvent::JoinedServer {
-                        server_id,
-                        server_name: "[not implemented]".to_string(),
-                        server_ip
-                    })?;
+                    client.send_event(&ClientEvent::ChangedServer(Some({
+                        server_info
+                    })))?;
                 } else {
                     warn!("PlayerJoined but player was not found: {}", steamid.steam2());
                 }
@@ -243,7 +240,7 @@ impl ManagerInstance {
                 if let Some(client) = self.find_client_by_steamid(steamid) {
                     let mut client = client.lock().await;
                     client._set_server(None);
-                    client.send_event(&ClientEvent::LeftServer)?;
+                    client.send_event(&ClientEvent::ChangedServer(None))?;
                 }
                 let mut server = server.lock().await;
                 server.remove_client(&steamid);
