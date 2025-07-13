@@ -1,34 +1,39 @@
 # Game Overlay
 
-Adds an overlay that modded game servers can interact with, allowing for custom text and actions for players. Examples are button actions for moderators (kick, ban, mute), or informational (extra player's names and health).
+Adds an overlay in game that dedicated servers with a plugin can add elements to, allowing for custom elements that include text, actions, admin tools, etc. For an example, the server can send a player list, where an admin can quickly see all players, see their health, items, and any other extra information. In addition, admins could also quickly kick, ban, or perform other plugin actions, with a friendly UI than that source engine can provide.
 
 > [!WARNING]
-> This project is under heavy development. Currently, all 3 parts work can work independently but have not been tested together.
+> Project is still in heavy development and may be abandoned for a while any time. 
+> 
+> In addition, as of currently, the three parts may work independently but not connected
 
 ## Implementation
 
-There are 3 parts:
+All sides are written in rust, using websockets to communicate to the manager
 
-* Manager
-  * Management UI for Server Operators (defining UI elements)
-* Client
-  * Overlay UI (the actual overlay)
-* Server
-  * Plugin API that sends/receives
-  * Plugin(s) implementing API that send and handle data
+[Client] <== websocket ==> [Manager] <== websocket ==> [Server]
 
-In practice, the manager is an inbetween party that facilates communication between clients and servers. Both the server and clients have a persistent websocket connection to the manager. 
-The server (via the Server Plugin) communicates to the manager, sending commands such as `UpdateUI` or `PlayerJoined`, specifiying steamid(s). The manager then forwards these messages to the specified clients if they are connected. The client then receives them from the manager and processes them. This can also work in reverse, with the client sending actions (buttons they have pressed).
+## Manager (src-manager)
+ The manager sits in between the servers and clients and facilates communication. It authenticates & verifies incoming requests and transmits them as events to the server/client.
+ For example, when a player joins a game, the server plugin informs the manager, which checks, and then informs the players. 
 
-### Manager
+ * Requires a mysql connection
+ * Requires steam API key
+ 
+## Client (src-overlay)
+ The client, or the overlay, is what runs on a user's computer. When it detects the game is running, it will appear and wait for the manager telling it instructions as events.
 
-Written in rust, in `src-manager`. Run with `cargo run`
+ * Uses egui for UI
+## Server (in [Jackzmc/sourcemod-plugins](https://github.com/Jackzmc/sourcemod-plugins/blob/master/scripting/sm_overlay.sp) for now)
+ The server is managed as a base sourcemod plugin that controls communication with the manager and core aspects. It also incldues any additional addon plugins that hook into the main plugin and add their own custom elements or features.
 
-### Client
+ * Requires a fork of ripext with websocket support and fixes.
 
-Requires the UI dev server to be running in `src-ui`, run with `yarn serve` (install dependencies first with `yarn`)
-Written in rust with tauri, in `src-tauri`. Run with `cargo run`.
 
-### Server
+### Building
 
-See `src-server/sourcemod` for the sourcemod plugin. Requires a fork of ripext with websocket support and fixes.
+For both manager and client
+```
+cd src-manager # or src-overlay
+cargo build # or run
+```
