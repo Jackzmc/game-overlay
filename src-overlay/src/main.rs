@@ -123,6 +123,7 @@ fn start_child_process(mut reader: PipeReader, target_pid: u32) {
     // Start background tasks
     let read_rx = start_manager_read_thread(manager.clone());
 
+    // idk if this is needed but it doesnt complain
     let (tx, rx) = channel();
     std::thread::spawn(move || {
         let mut buf = [0u8; 1024];
@@ -147,22 +148,6 @@ fn check_for_process(sys: &mut System, target_name: &str) -> Option<u32> {
     sys.refresh_processes_specifics(ProcessesToUpdate::All, true, ProcessRefreshKind::nothing().with_cmd(UpdateKind::Always));
     sys.processes_by_name(target_name.as_ref()).find(|p| true).map(|p| p.pid().as_u32())
 }
-
-// fn create_ui_thread(kill_signal: Arc<AtomicBool>, rx: std::sync::mpsc::Receiver<Signal>) -> JoinHandle<()> {
-//     std::thread::spawn(|| {
-//         // Set up the manager, this sends and receives all requests
-//         let manager = OverlayManagerInstance::new();
-//         let manager = Arc::new(Mutex::new(manager));
-//
-//         // Start background tasks
-//         let read_rx = start_manager_read_thread(manager.clone());
-//
-//         // Start the UI
-//         let state = OverlayData::example(manager, read_rx, kill_signal, rx);
-//         info!("START ui loop");
-//         egui_overlay::start(state);
-//     })
-// }
 
 fn setup_logging() {
     tracing_subscriber::registry()
