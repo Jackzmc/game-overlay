@@ -5,64 +5,93 @@ use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 use std::thread::sleep;
 use std::time::{Duration, Instant};
+use overlay_common::events::ClientEvent;
+use overlay_common::requests::ClientRequest;
+use overlay_common::SteamUser;
 use serde::{Deserialize, Serialize};
 use serde::de::DeserializeOwned;
 use overlay_manager;
-use overlay_manager::{ClientIncomingRequest, ClientOutgoingEvent, ManagerConnState};
 use reqwest::Url;
+use strum_macros::Display;
 use tokio::sync::broadcast;
 use tokio::sync::broadcast::{Receiver, Sender};
 use tracing::{debug, error, info};
 use tracing::log::trace;
 use tungstenite::stream::MaybeTlsStream;
-use tungstenite::{client, Message, WebSocket};
+use tungstenite::{client, Error, Message, WebSocket};
+use crate::defs::ServerInfo;
 
 pub struct ClientAuthorized {
     pub steamid2: String,
-    pub user: overlay_manager::SteamUser,
+    pub user: SteamUser,
     pub auth_token: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Represents the state of the manager's connection
+pub enum ManagerConnStatus {
+    /// Manager has been disconnected
+    Disconnected { reason: Option<String> },
+    /// Manager is connected, either for first time or reconnected.
+    /// May or may not be authenticated
+    Connected,
+    /// Manager is connected, has sent auth details, is waiting for response
+    /// ClientIncomingRequest:Authorized sent if authorized
+    WaitingForAuth,
+}
 
-pub struct OverlayManagerInstance {
+pub struct WebsocketClient {
     url: Url,
     socket: Option<WebSocket<MaybeTlsStream<TcpStream>>>,
     connect_attempts: u16,
     authorized: bool,
 
-    connection_state: ManagerConnState
+    state: Arc<Mutex<ManagerState>>
+}
+
+pub struct ManagerState {
+    connection_status: ManagerConnStatus,
+    server: Option<ServerInfo>,
+}
+impl Default for ManagerState {
+    fn default() -> Self {
+        Self {
+            server: None,
+            connection_status: ManagerConnStatus::Disconnected { reason: None },
+        }
+    }
 }
 
 /// one reader (UI), one writer (Inner)
-pub type OverlayState = Arc<Mutex<OverlayManager>>;
+pub type OverlayState = Arc<Mutex<SocketClient>>;
 /// read thread owns instance of manager
-pub type OverlayInner = Arc<Mutex<OverlayManager>>;
+pub type OverlayInner = Arc<Mutex<SocketClient>>;
 /*
 TWO CHOICES:
  - return procesing to UI, then it knows the state
  - read thread _is_ manager, and takes in OverlayState
 
  */
-pub type OverlayManager = Arc<Mutex<OverlayManagerInstance>>;
-impl OverlayManagerInstance {
+pub type SocketClient = Arc<Mutex<WebsocketClient>>;
+impl WebsocketClient {
     pub fn new() -> Self {
         let ws_url = Url::parse(&env::var("MANAGER_WS_URL")
             .unwrap_or_else(|_| "ws://127.0.0.1:3011/socket".to_string()))
             .expect("bad MANAGER_WS_URL");
 
         info!("Using url: {}", ws_url);
+        let state = Arc::new(Mutex::new(ManagerState::default()));
         Self {
             socket: None,
+            state,
             url: ws_url,
             connect_attempts: 0,
             authorized: false,
-
-            connection_state: ManagerConnState::Disconnected { reason: None }
         }
     }
 
-    pub fn conn_state(&self) -> &ManagerConnState {
-        &self.connection_state
+    pub fn state(&self) -> Arc<Mutex<ManagerState>> {
+        self.state.clone()
     }
     
     pub fn reconnect(&mut self) -> Result<(), String> {
@@ -118,8 +147,8 @@ impl OverlayManagerInstance {
     }
     pub fn wait_for_authorized(&mut self) -> Result<ClientAuthorized, String> {
         loop {
-            match self.read::<overlay_manager::ClientIncomingRequest>() {
-                Ok(Some(overlay_manager::ClientIncomingRequest::Authorized {steamid2, auth_token, user})) => {
+            match self.read::<ClientEvent>() {
+                Ok(ClientEvent::Authorized {steamid2, auth_token, user}) => {
                     self.authorized = true;
                     return Ok(ClientAuthorized {
                         steamid2,
@@ -127,9 +156,8 @@ impl OverlayManagerInstance {
                         auth_token
                     })
                 },
-                Ok(Some(_)) => return Err("manager sent unexpected data".to_string()),
+                Ok(_) => return Err("manager sent unexpected data".to_string()),
                 Err(e) => return Err(e.to_string()),
-                Ok(None) => {}
             }
         }
     }
@@ -142,9 +170,9 @@ impl OverlayManagerInstance {
         self.send(overlay_manager::InitConnectionReqPayload::Client { auth_token }.into())?;
         // let start_auth = Instant::now();
         loop {
-            if let Some(response) = self.read::<overlay_manager::InitConnectionResPayload>().map_err(|e| e.to_string())? {
-                return Ok(response)
-            }
+             let pay = self.read::<overlay_manager::InitConnectionResPayload>()
+                 .map_err(|e| e.to_string())?;
+            return Ok(pay)
         }
         Err("Authorization timed out".to_string())
     }
@@ -161,39 +189,31 @@ impl OverlayManagerInstance {
     }
 
     /// Reads from socket
-    pub fn read<T: DeserializeOwned> (&mut self) -> Result<Option<T>, tungstenite::Error> {
-        if self.socket.is_none() {
-            return Err(tungstenite::Error::ConnectionClosed);
-        }
+    pub fn read<T: DeserializeOwned> (&mut self) -> Result<T, ReadError> {
+        let socket = self.socket.as_mut().ok_or(ReadError::NotConnected)?;
         // send disconnect
-        let socket = self.socket.as_mut().unwrap();
-        match socket.read() {
-            Ok(msg) => {
-                Ok(msg.into_text().map(|text| {
-                    serde_json::from_str(&text).expect("could not serialize read()")
-                }).ok())
-            },
-            Err(e) => {
-                // if let Error::AlreadyClosed() = e || Error::ConnectionClosed
-                Err(e)
-            }
-        }
+        let msg = socket.read().map_err(|e| ReadError::Socket(e))?;
+        let text = msg.into_text().map_err(|e| ReadError::Socket(e))?;
+        serde_json::from_str::<T>(&text).map_err(|e| ReadError::InvalidMessage(e.to_string()))
     }
 
-    pub fn process_request(&mut self, req: ClientIncomingRequest) {
-        match req {
-            ClientIncomingRequest::JoinedServer { .. } => {}
-            ClientIncomingRequest::LeftServer => {}
-            ClientIncomingRequest::GameData { .. } => {}
-            ClientIncomingRequest::Authorized { .. } => {}
-            ClientIncomingRequest::ManagerConnState(state) => {
-                self.connection_state = state;
-            }
-            ClientIncomingRequest::RegisterTempElement { .. } => {}
-            ClientIncomingRequest::CreateElement { .. } => {}
-            ClientIncomingRequest::UpdateElement { .. } => {}
-            ClientIncomingRequest::ChangeAudioState { .. } => {}
-        }
+    /// Processes request internally, returning
+    pub fn process_request(&mut self, req: &ClientEvent) -> ReadResult {
+        // match req {
+        //     ClientEvent::JoinedServer { .. } => {}
+        //     ClientEvent::LeftServer => {}
+        //     ClientEvent::GameData { .. } => {}
+        //     ClientEvent::Authorized { .. } => {}
+        //     ClientEvent::ManagerConnState(state) => {
+        //         // self.connection_status = state;
+        //         // TODO:
+        //     }
+        //     ClientEvent::RegisterTempElement { .. } => {}
+        //     ClientEvent::CreateElement { .. } => {}
+        //     ClientEvent::UpdateElement { .. } => {}
+        //     ClientEvent::ChangeAudioState { .. } => {}
+        // }
+        ReadResult::Continue
     }
     
     pub fn send_action(&mut self, instance_id: String, namespace: String, command: String, input: Option<String>) -> Result<(), String> {
@@ -205,7 +225,7 @@ impl OverlayManagerInstance {
         if !self.authorized {
             return Err("Authentication time out".to_string());
         }
-        let str = serde_json::to_string(&ClientOutgoingEvent::Action {
+        let str = serde_json::to_string(&ClientRequest::Action {
             command,
             namespace,
             input: input.unwrap_or("".to_string()),
@@ -215,12 +235,33 @@ impl OverlayManagerInstance {
     }
 }
 
-fn manager_thread_init(manager: OverlayManager, tx: Sender<ClientIncomingRequest>) {
+#[derive(PartialEq)]
+enum ReadResult {
+    /// Continue to send to UI
+    Continue,
+    /// Do not send to UI
+    Handled
+}
+
+#[derive(Display)]
+enum ReadError {
+    Socket(tungstenite::Error),
+    InvalidMessage(String),
+    NotConnected
+}
+
+#[derive(Debug, Clone)]
+pub enum SocketMessage {
+    ClientEvent(ClientEvent),
+    Connection(ManagerConnStatus)
+}
+
+fn manager_thread_init(manager: SocketClient, tx: Sender<SocketMessage>) {
     debug!("Starting initial connection to manager...", );
 
     let mut manager = manager.lock().unwrap();
     manager.wait_for_connected(None);
-    tx.send(ClientIncomingRequest::ManagerConnState(ManagerConnState::Connected)).unwrap();
+    tx.send(SocketMessage::Connection(ManagerConnStatus::Connected)).unwrap();
 
     // Get the auth token, either from storage or new
     let keyring = keyring::Entry::new("game-overlay", "steamid").unwrap();
@@ -233,7 +274,7 @@ fn manager_thread_init(manager: OverlayManager, tx: Sender<ClientIncomingRequest
         let url = manager.begin_client().expect("failed to begin new account");
         webbrowser::open(&url).expect("could not open browser");
     }
-    tx.send(ClientIncomingRequest::ManagerConnState(ManagerConnState::WaitingForAuth)).unwrap();
+    tx.send(SocketMessage::Connection(ManagerConnStatus::WaitingForAuth)).unwrap();
 
     debug!("waiting for auth");
     match manager.wait_for_authorized() {
@@ -241,11 +282,11 @@ fn manager_thread_init(manager: OverlayManager, tx: Sender<ClientIncomingRequest
             // TODO: store steamid,user
             debug!("Authorized! {} {}", auth_data.steamid2, auth_data.user.persona_name);
             keyring.set_password(&auth_data.auth_token).unwrap();
-            tx.send(ClientIncomingRequest::Authorized {
+            tx.send(SocketMessage::ClientEvent(ClientEvent::Authorized {
                 steamid2: auth_data.steamid2,
                 auth_token: auth_data.auth_token,
                 user: auth_data.user,
-            }).unwrap();
+            })).unwrap();
         },
         _ => panic!("unexpected manager response")
     }
@@ -253,40 +294,43 @@ fn manager_thread_init(manager: OverlayManager, tx: Sender<ClientIncomingRequest
 
 static MANAGER_READ_INTERVAL: Duration = Duration::from_secs(5);
 const RX_CHANNEL_BUFFER: usize = 4;
-pub fn start_manager_read_thread(manager: OverlayManager) -> Receiver<ClientIncomingRequest> {
-    let (tx, rx) = broadcast::channel::<ClientIncomingRequest>(RX_CHANNEL_BUFFER);
+pub fn start_ws_read_thread(ws: SocketClient) -> Receiver<SocketMessage> {
+    let (tx, rx) = broadcast::channel::<SocketMessage>(RX_CHANNEL_BUFFER);
     std::thread::Builder::new()
         .name("manager-read-thread".to_string())
         .spawn(move || {
-            manager_thread_init(manager.clone(), tx.clone());
-            loop {
-                let mut manager = manager.lock().unwrap();
-                match manager.read::<ClientIncomingRequest>() {
-                    Ok(response) => {
-                        if let Some(response) = response {
-                            debug!("data: {:?}", response);
-                            manager.process_request(response);
-                            // tx.send(response).unwrap();
-                        }
-                    },
-                    Err(e) => {
-                        eprintln!("read error: {}", e);
-                        if let tungstenite::Error::Io(_) = e {
-                            // Losft connection, attempt to reconnect:
-                            // tx.send(ClientIncomingRequest::ManagerConnState(ManagerConnState::Disconnected {
-                            //     reason: Some("websocket_error".to_string())
-                            // })).unwrap();
-                            manager.wait_for_connected(None);
-                            // tx.send(ClientIncomingRequest::ManagerConnState(ManagerConnState::Connected)).unwrap();
-                        }
-                    },
-                }
-                drop(manager);
-                sleep(MANAGER_READ_INTERVAL)
-            }
+            ws_thread(ws.clone(), tx)
         })
         .expect("failed to create read thread");
     rx
 }
 
+fn ws_thread(ws: SocketClient, tx: Sender<SocketMessage>) {
+    manager_thread_init(ws.clone(), tx.clone());
+    loop {
+        let mut manager = ws.lock().unwrap();
+        match manager.read::<ClientEvent>() {
+            Ok(response) => {
+                debug!("data: {:?}", response);
+                if manager.process_request(&response) == ReadResult::Continue {
+                    tx.send(SocketMessage::ClientEvent(response)).unwrap();
+                }
+            },
+            Err(err) => {
+                eprintln!("read error: {}", err);
+                if let ReadError::Socket(tungstenite::Error::Io(_)) = err {
+                    // Losft connection, attempt to reconnect:
+                    // tx.send(ClientIncomingRequest::ManagerConnState(ManagerConnState::Disconnected {
+                    //     reason: Some("websocket_error".to_string())
+                    // })).unwrap();
+                    manager.wait_for_connected(None);
+                    // tx.send(ClientIncomingRequest::ManagerConnState(ManagerConnState::Connected)).unwrap();
+                }
+            }
+            _ => {}
+        }
+        drop(manager);
+        sleep(MANAGER_READ_INTERVAL)
+    }
+}
 

@@ -33,7 +33,7 @@ use tokio::sync;
 use tracing::{debug, error, info};
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::{fmt, prelude::*, EnvFilter};
-use crate::manager::{start_manager_read_thread, OverlayManagerInstance};
+use crate::manager::{start_ws_read_thread, WebsocketClient};
 use crate::ui::OverlayData;
 
 const MAIN_INTERVAL_SLEEP_MS: u64 = 500;
@@ -117,11 +117,26 @@ fn main() {
 
 /// Runs on child process, starting up and entering the egui event loop
 fn start_child_process(mut reader: PipeReader, target_pid: u32) {
-    let manager = OverlayManagerInstance::new();
-    let manager = Arc::new(Mutex::new(manager));
+    /* PROCESS:
+        - spawn manager, manager is arc<mutex<T>> - two copies:
+            - copy 1: to main (UI) thread
+            - copy 2: to bg read(or processing?) thread
+        - either:
+            - [A] separate arc<mutex<state>> that UI can just grab with little contention
+            - [B] lock manager, grab data
+
+        ok plan:
+            - rename manager instance to 'WebsocketClient'
+            - does all processing, connection, outputs manager events
+            - manager events get sent through channel to ui, checked every frame
+            - UI then updates its state.
+
+            - websocket client only does: reading (in thread), and send(...) [in another thread to process? is necessary? prob not its async]
+     */
+    let manager = Arc::new(Mutex::new(WebsocketClient::new()));
 
     // Start background tasks
-    let read_rx = start_manager_read_thread(manager.clone());
+    let read_rx = start_ws_read_thread(manager.clone());
 
     // idk if this is needed but it doesnt complain
     let (tx, rx) = channel();
