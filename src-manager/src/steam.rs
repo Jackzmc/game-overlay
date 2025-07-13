@@ -4,7 +4,7 @@ use reqwest::{RequestBuilder, Response};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use steamid_ng::SteamID;
-use overlay_manager::SteamUser;
+use overlay_common::SteamUser;
 
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

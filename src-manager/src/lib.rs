@@ -20,7 +20,7 @@ use tokio_tungstenite::tungstenite::Message as TungsteniteMessage;
 use axum::extract::ws::Message as AxumMessage;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use overlay_common::AuthFailure;
+pub use overlay_common::AuthFailure;
 
 impl Into<AxumMessage> for InitConnectionResPayload {
     fn into(self) -> AxumMessage {
