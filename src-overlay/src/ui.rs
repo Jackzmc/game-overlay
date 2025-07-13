@@ -16,7 +16,7 @@ use egui::text::LayoutJob;
 use egui_extras::{install_image_loaders, Column, TableBuilder};
 use egui_overlay::EguiOverlay;
 use egui_overlay::egui_render_three_d::ThreeDBackend as DefaultGfxBackend;
-use overlay_manager::ClientIncomingRequest;
+use overlay_common::events::ClientEvent;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tokio::sync::broadcast::Receiver;
@@ -24,7 +24,7 @@ use tracing::{debug, error, info};
 use tracing::log::trace;
 pub(crate) use crate::defs::{PlayerInfo, PlayerTeam, ServerInfo};
 use crate::defs::{TeamConfig, TeamShow};
-use crate::manager::OverlayManager;
+use crate::manager::{SocketClient, SocketMessage};
 use crate::registry::Registry;
 use crate::templates::list_player::TemplateListPlayers;
 use crate::templates::{Element, ElementState, Template};
@@ -40,7 +40,7 @@ struct PromptData {
 }
 
 pub struct OverlayData {
-    manager: OverlayManager,
+    manager: SocketClient,
     server: Option<ServerInfo>,
     initialized: bool,
     startup_message_remain: Option<Instant>,
@@ -48,7 +48,7 @@ pub struct OverlayData {
     /// Determines visibility of the UI
     ui_state: UIState,
 
-    read_rx: Receiver<ClientIncomingRequest>,
+    socket_rx: Receiver<SocketMessage>,
 
     /// Contains list of all active shown elements. Key is element ID
     elements: HashMap<String, Element>,
@@ -196,17 +196,6 @@ impl OverlayData {
         debug!("spawn_elem template={} id={}", template_id, id);
     }
 
-    // /// Marks an element id as approved or unapproved
-    // /// request_elem should be called at least once before this method is used
-    // /// Will panic if element is not in list
-    // pub fn set_elem_approval(&mut self, id: &str, value: bool) {
-    //     if let Some(server) = self.server() {
-    //         let list = self.store.approved_elems(server.ip_addr.clone());
-    //         let entry = list.get_mut(id).expect("request_elem not called before set_elem_approval; no entry");
-    //         entry.enabled = value;
-    //         debug!("set_elem_approval id={} value={}", id, value);
-    //     }
-    // }
     pub fn server(&self) -> Option<&ServerInfo> {
         self.server.as_ref()
     }
@@ -217,7 +206,7 @@ impl OverlayData {
         let msg = Message { created_at: Instant::now(), _type, title: title, content: content.into() };
         self.messages.push(msg);
     }
-    pub fn example(manager: OverlayManager, manager_rx: Receiver<ClientIncomingRequest>, reader: std::sync::mpsc::Receiver<Vec<u8>>, target_pid: u32) -> Self {
+    pub fn example(manager: SocketClient, manager_rx: Receiver<SocketMessage>, reader: std::sync::mpsc::Receiver<Vec<u8>>, target_pid: u32) -> Self {
         let mut registry = Registry::new();
         registry.register("overlay:list_players", TemplateListPlayers {});
         registry.register("overlay:generic_text", TemplateGenericText);
@@ -301,7 +290,7 @@ impl OverlayData {
             initialized: false,
             startup_message_remain: Some(Instant::now()),
             ui_state: UIState::Inactive,
-            read_rx: manager_rx,
+            socket_rx: manager_rx,
             elements: HashMap::new(),
             prompt_state: Some(PromptData {
                 multiline: false,
@@ -314,20 +303,6 @@ impl OverlayData {
             },
             registry
         };
-        //registry.try_temp("overlay:list_players", json!({
-        //                     "actions": {
-        //                        "STEAM_1:0:49243767": [
-        //                             {
-        //                                 "label": "Kick Player",
-        //                                 "command": "sm_kick #23"
-        //                             },
-        //                                                         {
-        //                                 "label": "Slay Player",
-        //                                 "command": "sm_slay #23"
-        //                             }
-        //                         ]
-        //                     }
-        //                 })),
         s.request_elem("overlay:list_players", "list_players_test",
        json!({
             "actions": {

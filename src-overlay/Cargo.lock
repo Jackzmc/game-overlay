@@ -3193,6 +3193,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "overlay_common"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "overlay_manager"
 version = "0.1.0"
 dependencies = [
@@ -3205,6 +3213,7 @@ dependencies = [
  "jwt",
  "log",
  "once_cell",
+ "overlay_common",
  "pretty_env_logger",
  "reqwest",
  "serde",
@@ -3237,6 +3246,7 @@ dependencies = [
  "image",
  "keyring",
  "libc 1.0.0-alpha.1",
+ "overlay_common",
  "overlay_manager",
  "reqwest",
  "serde",
