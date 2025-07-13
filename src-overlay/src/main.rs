@@ -1,7 +1,7 @@
 #![windows_subsystem = "windows"] // to turn off console.
 
 mod ui;
-mod manager;
+mod ws_client;
 mod templates;
 
 mod defs;
@@ -33,7 +33,7 @@ use tokio::sync;
 use tracing::{debug, error, info};
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::{fmt, prelude::*, EnvFilter};
-use crate::manager::{start_ws_read_thread, WebsocketClient};
+use crate::ws_client::{start_ws_read_thread, WebsocketClient};
 use crate::ui::OverlayData;
 
 const MAIN_INTERVAL_SLEEP_MS: u64 = 500;
@@ -169,7 +169,7 @@ fn setup_logging() {
         .with(fmt::layer())
         .with(
             EnvFilter::try_from_default_env()
-                .unwrap_or(EnvFilter::new("overlay_ui=debug,warn")),
+                .unwrap_or(EnvFilter::new(format!("{}=debug,warn", env!("CARGO_PKG_NAME")))),
         )
         .init();
 }

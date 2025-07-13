@@ -26,7 +26,7 @@ use tracing::log::trace;
 use overlay_common::ElementState;
 pub(crate) use crate::defs::{PlayerInfo, PlayerTeam, ServerInfo};
 use crate::defs::{TeamConfig, TeamShow};
-use crate::manager::{ManagerConnStatus, SocketClient, SocketMessage};
+use crate::ws_client::{ManagerConnStatus, SocketClient, SocketMessage};
 use crate::registry::Registry;
 use crate::templates::list_player::TemplateListPlayers;
 use crate::templates::{Element,  Template};

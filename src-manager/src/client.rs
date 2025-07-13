@@ -12,19 +12,20 @@ use overlay_common::events::ClientEvent;
 use overlay_common::requests::ClientRequest;
 use crate::JWT_SECRET_KEY;
 use crate::manager::{RequestError, Server};
+use crate::web::websocket::WSMessage;
 
 pub struct ClientInstance {
     id: Uuid,
     steamid: Option<SteamID>,
     server: Option<Server>,
     addr: SocketAddr,
-    tx: UnboundedSender<Message>,
+    tx: UnboundedSender<WSMessage>,
 }
 impl ClientInstance {
     pub fn next_id() -> String {
         Uuid::new_v4().to_string()
     }
-    pub fn with_id(addr: SocketAddr, tx: UnboundedSender<Message>, id: String) -> Self {
+    pub fn with_id(addr: SocketAddr, tx: UnboundedSender<WSMessage>, id: String) -> Self {
         Self {
             id: id.parse().unwrap(),
             steamid: None,
@@ -52,7 +53,7 @@ impl ClientInstance {
 
     pub fn send_event(&self, event: &ClientEvent) -> Result<(), RequestError> {
         let json = serde_json::to_string(event).map_err(|_| RequestError::RequestNotSerializable)?;
-        self.tx.send(Message::Text(json)).map_err(|_| ()).map_err(|_| RequestError::Disconnected)
+        self.tx.send(WSMessage(Message::Text(json))).map_err(|_| ()).map_err(|_| RequestError::Disconnected)
     }
 
     pub fn generate_auth_token(&self) -> Result<String, String> {

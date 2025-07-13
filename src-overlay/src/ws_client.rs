@@ -10,7 +10,6 @@ use overlay_common::requests::ClientRequest;
 use overlay_common::SteamUser;
 use serde::{Deserialize, Serialize};
 use serde::de::DeserializeOwned;
-use overlay_manager;
 use reqwest::Url;
 use strum_macros::Display;
 use tokio::sync::broadcast;
@@ -19,6 +18,7 @@ use tracing::{debug, error, info};
 use tracing::log::trace;
 use tungstenite::stream::MaybeTlsStream;
 use tungstenite::{client, Error, Message, WebSocket};
+use overlay_common::ws::{AuthRequest, WSResponse};
 use crate::defs::ServerInfo;
 
 pub struct ClientAuthorized {
@@ -141,7 +141,7 @@ impl WebsocketClient {
     // two auth procedures: first time (get url) or token
     pub fn begin_client(&mut self) -> Result<String, String> {
         match self._authorize(None)? {
-            overlay_manager::InitConnectionResPayload::PendingClientLogin { url } => Ok(url),
+            WSResponse::PendingLogin { url } => Ok(url),
             other => Err(format!("manager returned unexpected response"))
         }
     }
@@ -163,27 +163,27 @@ impl WebsocketClient {
     }
     // TODO: split Authorized out into own struct
     pub fn authorize_with_token(&mut self, auth_token: String) -> Result<(), String> {
-        self.send(overlay_manager::InitConnectionReqPayload::Client { auth_token: Some(auth_token) }.into())?;
+        self.send(AuthRequest::Client { auth_token: Some(auth_token) }.into())?;
         Ok(())
     }
-    fn _authorize(&mut self, auth_token: Option<String>) -> Result<overlay_manager::InitConnectionResPayload, String> {
-        self.send(overlay_manager::InitConnectionReqPayload::Client { auth_token }.into())?;
+    fn _authorize(&mut self, auth_token: Option<String>) -> Result<WSResponse, String> {
+        self.send(AuthRequest::Client { auth_token }.into())?;
         // let start_auth = Instant::now();
         loop {
-             let pay = self.read::<overlay_manager::InitConnectionResPayload>()
+             let pay = self.read::<WSResponse>()
                  .map_err(|e| e.to_string())?;
             return Ok(pay)
         }
         Err("Authorization timed out".to_string())
     }
     
-    fn send(&mut self, msg: Message) -> Result<(), String> {
+    fn send(&mut self, msg: WSMessage) -> Result<(), String> {
         if self.socket.is_none() {
             return Err("Not connected to socket".to_string());
         }
         trace!("send: pre");
         let socket = self.socket.as_mut().unwrap();
-        socket.send(msg).map_err(|e| e.to_string())?;
+        socket.send(msg.0).map_err(|e| e.to_string())?;
         trace!("send: done");
         Ok(())
     }
@@ -225,13 +225,25 @@ impl WebsocketClient {
         if !self.authorized {
             return Err("Authentication time out".to_string());
         }
-        let str = serde_json::to_string(&ClientRequest::Action {
+        self.send(ClientRequest::Action {
             command,
             namespace,
             input: input.unwrap_or("".to_string()),
             instance_id
-        }).unwrap();
-        self.send(Message::Text(str))
+        }.into())
+    }
+}
+
+/// Work around not being able to impl Into<Message>
+struct WSMessage(Message);
+impl Into<WSMessage> for AuthRequest {
+    fn into(self) -> WSMessage {
+        WSMessage(Message::Text(serde_json::to_string(&self).expect("failed to serialize AuthRequest")))
+    }
+}
+impl Into<WSMessage> for ClientRequest {
+    fn into(self) -> WSMessage {
+        WSMessage(Message::Text(serde_json::to_string(&self).expect("failed to serialize AuthRequest")))
     }
 }
 

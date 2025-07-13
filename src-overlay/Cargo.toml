@@ -1,5 +1,5 @@
 [package]
-name = "overlay_ui"
+name = "overlay_client"
 publish = false
 edition = "2024"
 

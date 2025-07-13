@@ -1,5 +1,5 @@
 use serde::{Serialize, Deserialize};
-use crate::{ElementOptions, ElementState, SteamUser, TargetSelection, UITemplate};
+use crate::{ElementOptions, ElementState, SteamUser, TargetSelection};
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(tag = "type")]

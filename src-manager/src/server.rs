@@ -15,9 +15,10 @@ use overlay_common::game::ServerInfo;
 use overlay_common::requests::{ClientRequest, ServerRequest};
 use crate::manager::{Client, RequestError};
 use crate::POOL;
+use crate::web::websocket::WSMessage;
 
 pub struct ServerInstance {
-    tx: UnboundedSender<Message>,
+    tx: UnboundedSender<WSMessage>,
     namespace: String,
     id: String,
     clients: HashMap<SteamID, Client>,
@@ -33,7 +34,7 @@ impl ServerInstance {
     pub fn next_id() -> Uuid {
         Uuid::new_v4()
     }
-    pub fn with_id(addr: SocketAddr, tx: UnboundedSender<Message>, namespace: String, id: String) -> Self {
+    pub fn with_id(addr: SocketAddr, tx: UnboundedSender<WSMessage>, namespace: String, id: String) -> Self {
         Self {
             addr,
             tx,
@@ -55,7 +56,7 @@ impl ServerInstance {
 
     pub fn send_event(&self, event: &ServerEvent) -> Result<(), RequestError> {
         let json = serde_json::to_string(event).map_err(|_| RequestError::RequestNotSerializable)?;
-        self.tx.send(Message::Text(json)).map_err(|_| ()).map_err(|_| RequestError::Disconnected)
+        self.tx.send(WSMessage(Message::Text(json))).map_err(|_| ()).map_err(|_| RequestError::Disconnected)
     }
 
     fn get_client(&self, steamid: SteamID) -> Option<Client> {

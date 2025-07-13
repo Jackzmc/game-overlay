@@ -8,6 +8,7 @@ use serde_json::Value;
 pub mod events;
 pub mod requests;
 pub mod game;
+pub mod ws;
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct ElementOptions {
@@ -28,54 +29,6 @@ pub enum ClientSelection {
     Steamids { steamids: Vec<String> },
     /// apply to all clients connected to server
     All
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-#[serde(rename_all = "snake_case")]
-pub struct UITemplate {
-    #[serde(rename = "type")]
-    pub ui_type: String,
-    #[serde(flatten)]
-    pub other_fields: Value
-}
-
-#[derive(Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-#[serde(tag = "type")]
-pub enum AuthPayload {
-    Client { auth_token: Option<String> },
-    Server { auth_token: String }
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-#[serde(tag = "code")]
-/// Represents an authentication error
-pub enum AuthFailure {
-    InvalidAuthToken { message: Option<String> },
-    InternalError { message: Option<String> },
-    Unknown,
-    General { message: String },
-    Timeout,
-    ObjectNotFound
-}
-
-impl Error for AuthFailure {}
-impl fmt::Display for AuthFailure {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            AuthFailure::General { message} => write!(f, "{}", message),
-            AuthFailure::InvalidAuthToken { message} => {
-                if let Some(msg) = message {
-                    write!(f, "{}", msg)
-                } else {
-                    write!(f, "auth token is either invalid or unauthorized")
-                }
-            },
-            AuthFailure::ObjectNotFound => write!(f, "client or server being authorized does not exist"),
-            _ => write!(f, "generic authentication failure")
-        }
-    }
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -114,6 +67,7 @@ pub struct SteamUser {
     pub time_created: i64,
 }
 
+/// The type of an element's state.
 pub type ElementState = Value;
 
 #[derive(Serialize, Deserialize, Clone, Debug)]

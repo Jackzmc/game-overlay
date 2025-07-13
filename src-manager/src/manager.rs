@@ -16,11 +16,13 @@ use steamid_ng::{SteamID, SteamIDError};
 use tokio::sync::mpsc::UnboundedSender;
 use overlay_common::events::{ClientEvent, ServerEvent};
 use overlay_common::requests::{ClientRequest, ServerRequest};
-use overlay_common::{AuthFailure, TargetSelection};
+use overlay_common::{TargetSelection};
+use overlay_common::ws::AuthFailure;
 use crate::client::{ClientInstance};
 use crate::{JWT_SECRET_KEY};
 use crate::server::{ServerInstance};
 use crate::steam::{SteamClient};
+use crate::web::websocket::WSMessage;
 
 pub type Client = Arc<Mutex<ClientInstance>>;
 pub type Server = Arc<Mutex<ServerInstance>>;
@@ -79,7 +81,7 @@ impl ManagerInstance {
 
     /// Starts a new client connection
     /// If auth token is not provided, client is temporarily
-    pub fn start_client(&mut self, addr: SocketAddr, tx: UnboundedSender<Message>) -> Result<(Client, String), AuthFailure> {
+    pub fn start_client(&mut self, addr: SocketAddr, tx: UnboundedSender<WSMessage>) -> Result<(Client, String), AuthFailure> {
         let id = ClientInstance::next_id();
         let client = ClientInstance::with_id(addr, tx, id.clone());
         let client = Arc::new(Mutex::new(client));
@@ -160,7 +162,7 @@ impl ManagerInstance {
     }
 
 
-    pub async fn try_authorize_server(&mut self, addr: SocketAddr, tx: UnboundedSender<Message>, auth_token: String) -> Result<Server, AuthFailure> {
+    pub async fn try_authorize_server(&mut self, addr: SocketAddr, tx: UnboundedSender<WSMessage>, auth_token: String) -> Result<Server, AuthFailure> {
         let claims: ServerTokenClaims = auth_token.verify_with_key(JWT_SECRET_KEY.deref())
             .map_err(|e| AuthFailure::InvalidAuthToken { message: Some(e.to_string()) })?;
         let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();

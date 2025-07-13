@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use crate::{ElementOptions, ElementState, SteamUser, UITemplate};
+use crate::{ElementOptions, ElementState, SteamUser};
 use crate::game::ServerInfo;
 
 #[derive(Serialize, Deserialize, Debug, Clone)]

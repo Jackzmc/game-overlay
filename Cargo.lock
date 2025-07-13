@@ -2992,6 +2992,40 @@ dependencies = [
 ]
 
 [[package]]
+name = "overlay_client"
+version = "0.0.0"
+dependencies = [
+ "active-win-pos-rs",
+ "daemonize",
+ "directories-next",
+ "dotenvy",
+ "egui 0.32.0",
+ "egui_extras",
+ "egui_overlay",
+ "egui_window_glfw_passthrough 0.9.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "fork",
+ "global-hotkey",
+ "image",
+ "keyring",
+ "libc 1.0.0-alpha.1",
+ "overlay_common",
+ "overlay_manager",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "steamid-ng 2.0.0",
+ "strum",
+ "strum_macros",
+ "sysinfo",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "tungstenite",
+ "uuid",
+ "webbrowser",
+]
+
+[[package]]
 name = "overlay_common"
 version = "0.1.0"
 dependencies = [
@@ -3028,40 +3062,6 @@ dependencies = [
  "tracing-subscriber",
  "url",
  "uuid",
-]
-
-[[package]]
-name = "overlay_ui"
-version = "0.0.0"
-dependencies = [
- "active-win-pos-rs",
- "daemonize",
- "directories-next",
- "dotenvy",
- "egui 0.32.0",
- "egui_extras",
- "egui_overlay",
- "egui_window_glfw_passthrough 0.9.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "fork",
- "global-hotkey",
- "image",
- "keyring",
- "libc 1.0.0-alpha.1",
- "overlay_common",
- "overlay_manager",
- "reqwest",
- "serde",
- "serde_json",
- "steamid-ng 2.0.0",
- "strum",
- "strum_macros",
- "sysinfo",
- "tokio",
- "tracing",
- "tracing-subscriber",
- "tungstenite",
- "uuid",
- "webbrowser",
 ]
 
 [[package]]
