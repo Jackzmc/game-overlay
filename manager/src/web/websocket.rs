@@ -70,9 +70,9 @@ async fn login_connection(mut ws: WebSocket, manager: Manager, req: AuthRequest,
                 }
             }
         }
-        AuthRequest::Server { auth_token } => {
+        AuthRequest::Server { auth_token, info} => {
             debug!("login_connection - authorizing server");
-            match mngr.try_authorize_server(addr, tx.clone(), auth_token).await {
+            match mngr.try_authorize_server(addr, tx.clone(), auth_token, info).await {
                 Ok(server) => {
                     drop(mngr);
                     {

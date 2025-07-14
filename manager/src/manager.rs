@@ -17,7 +17,7 @@ use tokio::sync::mpsc::UnboundedSender;
 use overlay_common::events::{ClientEvent, ServerEvent};
 use overlay_common::requests::{ClientRequest, ServerRequest};
 use overlay_common::{TargetSelection};
-use overlay_common::ws::AuthFailure;
+use overlay_common::ws::{AuthFailure, InitialServerInfo};
 use crate::client::{ClientInstance};
 use crate::{JWT_SECRET_KEY};
 use crate::server::{ServerInstance};
@@ -162,14 +162,14 @@ impl ManagerInstance {
     }
 
 
-    pub async fn try_authorize_server(&mut self, addr: SocketAddr, tx: UnboundedSender<WSMessage>, auth_token: String) -> Result<Server, AuthFailure> {
+    pub async fn try_authorize_server(&mut self, addr: SocketAddr, tx: UnboundedSender<WSMessage>, auth_token: String, info: InitialServerInfo) -> Result<Server, AuthFailure> {
         let claims: ServerTokenClaims = auth_token.verify_with_key(JWT_SECRET_KEY.deref())
             .map_err(|e| AuthFailure::InvalidAuthToken { message: Some(e.to_string()) })?;
         let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
         if claims.issued_at > now {
             return Err(AuthFailure::InvalidAuthToken { message: Some("token issued in the future and is invalid".to_string()) })
         }
-        let server = ServerInstance::with_id(addr, tx, claims.namespace, claims.subject.clone());
+        let server = ServerInstance::with_id(addr, tx, claims.namespace, claims.subject.clone(), info);
         let server = Arc::new(Mutex::new(server));
         self.servers.insert(claims.subject, server.clone());
         Ok(server)
@@ -217,6 +217,9 @@ impl ManagerInstance {
     }
     pub async fn on_server_request(&mut self, event: &ServerRequest, server: Server) -> Result<(), RequestError> {
         match event {
+            ServerRequest::ServerInfo { hostname } => {
+
+            },
             ServerRequest::PlayerJoined { steamid} => {
                 let steamid = SteamID::from_steam2(steamid).map_err(|_| RequestError::InvalidData)?;
                 // If there is no client with that steamid, ignore it, they aren't using overlay

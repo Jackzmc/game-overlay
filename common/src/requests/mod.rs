@@ -1,5 +1,6 @@
 use serde::{Serialize, Deserialize};
 use crate::{ElementOptions, ElementState, SteamUser, TargetSelection};
+use crate::game::TeamConfig;
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(tag = "type")]
@@ -32,7 +33,14 @@ pub enum ServerRequest {
 
 
     */
-
+    InitialServerInfo {
+        hostname: String,
+        teams: Vec<TeamConfig>
+    },
+    ServerInfo {
+        hostname: Option<String>,
+        // game: Option<GameInfo>
+    },
     PlayerJoined { steamid: String },
     PlayerLeft { steamid: String },
     GameState {}, // TODO: implement

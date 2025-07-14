@@ -11,8 +11,9 @@ use steamid_ng::SteamID;
 use tokio::sync::mpsc::UnboundedSender;
 use uuid::Uuid;
 use overlay_common::events::{ClientEvent, ServerEvent};
-use overlay_common::game::ServerInfo;
+use overlay_common::game::{ServerInfo, TeamConfig};
 use overlay_common::requests::{ClientRequest, ServerRequest};
+use overlay_common::ws::InitialServerInfo;
 use crate::manager::{Client, RequestError};
 use crate::POOL;
 use crate::web::websocket::WSMessage;
@@ -23,6 +24,10 @@ pub struct ServerInstance {
     id: String,
     clients: HashMap<SteamID, Client>,
     addr: SocketAddr,
+
+    name: String,
+    game_type: u32,
+    teams: Vec<TeamConfig>
     // TODO: ugh
     // teams: Vec<TeamConfig>
     // players: Vec<PlayerInfo>
@@ -34,13 +39,16 @@ impl ServerInstance {
     pub fn next_id() -> Uuid {
         Uuid::new_v4()
     }
-    pub fn with_id(addr: SocketAddr, tx: UnboundedSender<WSMessage>, namespace: String, id: String) -> Self {
+    pub fn with_id(addr: SocketAddr, tx: UnboundedSender<WSMessage>, namespace: String, id: String, info: InitialServerInfo) -> Self {
         Self {
             addr,
             tx,
             namespace,
             id,
             clients: HashMap::new(),
+            name: info.hostname,
+            game_type: info.game_type,
+            teams: info.teams,
         }
     }
     pub fn namespace(&self) -> &str { &self.namespace }

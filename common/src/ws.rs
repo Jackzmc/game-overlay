@@ -1,6 +1,7 @@
 use std::error::Error;
 use std::fmt;
 use serde::{Deserialize, Serialize};
+use crate::game::TeamConfig;
 
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -9,7 +10,17 @@ use serde::{Deserialize, Serialize};
 /// After authentication, it becomes ClientRequest or ServerRequest
 pub enum AuthRequest {
     Client { auth_token: Option<String> },
-    Server { auth_token: String }
+    Server { auth_token: String, info: InitialServerInfo }
+}
+
+/// Initial server information, sent in authentication, before server is registered
+/// Necessary to prevent Option<...> in server
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct InitialServerInfo {
+    pub hostname: String,
+    pub teams: Vec<TeamConfig>,
+    pub game_type: u32
 }
 
 #[derive(Debug, Serialize, Deserialize)]
