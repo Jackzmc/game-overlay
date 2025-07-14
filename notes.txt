@@ -1,0 +1,14 @@
+Overlay has a main window, shown in CTRL+HOME mode, with white light bg
+Overlay also has notifications (configureable anchor in settings)
+
+Server sends element, either with permanent name my_elem, or temp:uuid-uuid-uuid-uuid
+Client then has friend list like UI, where they can approve each permanent elem and enable/disable temp
+Client preferences are saved per server
+
+--
+Need two process:
+(A) Main, simple, just checks for game process
+    - When detected, launches new process
+(B) This process, that runs UI and manager threads
+
+perl -MPOSIX -e '$0="left4dead2"; pause'

@@ -1,12 +1,4 @@
-use std::collections::HashMap;
-use egui::{Align, CollapsingHeader, ImageSource, Layout, Margin, RichText, Window};
-use egui::scroll_area::State;
-use egui_overlay::egui_render_three_d::three_d::Context;
-use serde::{Deserialize, Serialize};
-use serde_json::Value;
-use serde_json::Value::Null;
-use tracing::debug;
-use tracing::log::warn;
+use egui::{ImageSource};
 use overlay_common::ElementState;
 use crate::defs::{ServerInfo, TeamShow};
 use crate::templates::{Template};

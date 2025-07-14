@@ -3009,7 +3009,6 @@ dependencies = [
  "keyring",
  "libc 1.0.0-alpha.1",
  "overlay_common",
- "overlay_manager",
  "reqwest",
  "serde",
  "serde_json",

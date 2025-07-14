@@ -16,7 +16,6 @@ serde_json = { workspace = true }
 sysinfo = "*"
 active-win-pos-rs = "0.8"
 tokio = "1.37.0"
-overlay_manager = { path = "../src-manager" }
 keyring = "2"
 webbrowser = "1.0.0"
 tungstenite = { workspace = true }
@@ -24,7 +23,7 @@ egui_extras = { version = "0.32.0", features = ["http", "image", "svg"] }
 image = { version = "0.25", features = ["png", "jpeg"] }
 strum = "0.27.1"
 strum_macros = "0.27.1"
-uuid = "1.17.0"
+uuid = { version = "1.17.0", features = ["v4"] }
 steamid-ng = "2.0.0"
 directories-next = "2.0.0"
 global-hotkey = "0.7.0"

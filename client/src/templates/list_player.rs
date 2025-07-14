@@ -8,7 +8,6 @@ use serde_json::Value;
 use serde_json::Value::Null;
 use steamid_ng::SteamID;
 use tracing::debug;
-use tracing::log::warn;
 use overlay_common::ElementState;
 use crate::defs::{ServerInfo, TeamShow};
 use crate::templates::{ Template};
