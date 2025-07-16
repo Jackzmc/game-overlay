@@ -8,7 +8,7 @@ use handlebars::Handlebars;
 use log::{debug, warn};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use crate::APP_USER_AGENT;
+use crate::{AppEngine, APP_USER_AGENT};
 use crate::steam::OpenIDPayload;
 
 pub mod routes;
@@ -22,8 +22,8 @@ pub fn get_http_client() -> reqwest::Client {
         .expect("could not create HTTP client")
 }
 
-pub fn get_template_engine() -> Engine<Handlebars<'static>> {
-    let mut hb = Handlebars::new();
+pub fn get_template_engine() -> AppEngine {
+    let mut hbs = Handlebars::new();
     match fs::read_dir(env::current_dir().unwrap().join("templates")) {
         Ok(files) => {
             for entry in files {
@@ -32,7 +32,7 @@ pub fn get_template_engine() -> Engine<Handlebars<'static>> {
                     let path = entry.path();
                     let name = path.file_stem().unwrap().to_str().unwrap();
                     debug!("registering template \"{}\"", name);
-                    hb.register_template_file(name, &path).unwrap()
+                    hbs.register_template_file(name, &path).unwrap()
                 }
             }
         },
@@ -44,7 +44,7 @@ pub fn get_template_engine() -> Engine<Handlebars<'static>> {
             }
         }
     }
-    Engine::from(hb)
+    Engine::from(hbs)
 }
 
 #[derive(Serialize, Deserialize)]

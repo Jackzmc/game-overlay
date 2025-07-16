@@ -13,6 +13,7 @@ use std::path::PathBuf;
 use std::sync::{atomic::{Ordering}, Arc, Mutex, OnceLock};
 use std::time::Duration;
 use std::{env};
+use axum::extract::FromRef;
 use tokio::sync::{RwLock};
 
 use crate::manager::{Manager, ManagerInstance};
@@ -42,7 +43,7 @@ static POOL: OnceLock<MySqlPool> = OnceLock::new();
 
 pub type AppEngine = Engine<Handlebars<'static>>;
 struct ServeDir(PathBuf);
-#[derive(Clone)]
+#[derive(Clone, FromRef)]
 struct AppState {
     manager: Manager,
     steam: SteamClient,
@@ -59,13 +60,13 @@ impl AppState {
         let manager = ManagerInstance::new(steam.clone());
         let manager: Manager = Arc::new(tokio::sync::Mutex::new(manager));
 
-        let hb = web::get_template_engine();
+        let hbs = web::get_template_engine();
 
         Self {
             manager,
             steam,
             http: http_client,
-            engine: Engine::from(hb),
+            engine: hbs,
             public_url
         }
     }
@@ -98,8 +99,8 @@ async fn main() {
             let state = AppState::new(public_url).await;
 
             let app = web::routes::get_router()
-                .with_state(Arc::new(state))
-                .with_state(AppEngine::new(Handlebars::new()));
+                .with_state(Arc::new(state));
+                // .with_state(AppEngine::new(Handlebars::new()));
             axum::serve(listener, app.into_make_service_with_connect_info::<SocketAddr>()).await.unwrap();
         },
         Err(e) => {

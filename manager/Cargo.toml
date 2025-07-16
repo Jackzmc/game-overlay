@@ -30,7 +30,7 @@ serde_qs = {  version = "0.13.0", features = ["warp"] }
 hmac = "0.12.1"
 sha2 = "0.10.8"
 axum-template = { version = "3.0.0", features = ["handlebars"] }
-axum = { version = "0.8.4", features = ["ws", "macros"] }
+axum = { version = "0.8.0", features = ["ws", "macros"] }
 sqlx = { version = "0.8.6", features = [ "runtime-tokio", "mysql", "json", "macros" ] }
 dotenvy = { workspace = true }
 overlay_common = { workspace = true }
