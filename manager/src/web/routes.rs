@@ -5,16 +5,18 @@ use std::sync::Arc;
 use axum::extract::{ConnectInfo, Query, State, WebSocketUpgrade};
 use axum::extract::ws::WebSocket;
 use axum::http::{HeaderMap, StatusCode};
-use axum::response::IntoResponse;
+use axum::response::{IntoResponse, NoContent, Response};
 use axum::{Json, Router};
 use axum::routing::{get, post};
 use axum_template::RenderHtml;
 use jwt::Header;
 use log::__private_api::Value;
 use serde::{Deserialize, Serialize};
-use tracing::debug;
+use tracing::{debug, trace};
 use serde_json::json;
+use sqlx::Either;
 use steamid_ng::SteamID;
+use overlay_common::events::ServerEvent;
 use overlay_common::ws::{AppError, AuthFailure, AuthReq_Server, WSRequest, WSResponse};
 use overlay_common::ws::AuthFailure::Timeout;
 use crate::{AppEngine, AppState};
@@ -31,7 +33,8 @@ pub(crate) fn get_router() -> Router<Arc<AppState>> {
         .route("/auth/login", get(route_steam_login))
         .route("/auth/callback", get(route_steam_callback))
 
-       .route("/req", get(route_request))
+       .route("/req", post(route_request))
+       .route("/events", get(route_poll_events))
 }
 
 async fn route_request(
@@ -42,14 +45,20 @@ async fn route_request(
 ) -> Result<impl IntoResponse, ResponseError> {
     // headers.get("authorization") // TODO: validate
     if let WSRequest::Server(req) = body {
+        trace!("new server request: {:?}", req);
         if let Some(sess_token) = headers.get("authorization") {
-            let sess_token = sess_token.to_str().map_err(|_|AppError::BadRequest { message: Some("bad session token string".to_string()) })?;
+            let sess_token = sess_token.to_str()
+                .map_err(|_|AppError::BadRequest { message: Some("bad session token string".to_string()) })?
+                // strip out 'Bearer' from 'Bearer <token>'
+                .to_string()
+                .split(" ").skip(1).collect::<String>();
             let manager = state.manager.clone();
             let mut manager = manager.lock().await;
-            let server = manager.get_session_server(sess_token)?;
+            let server = manager.get_session_server(&sess_token)?;
 
             // let server = server.lock().await;
             manager.on_server_request(&req, server).await?;
+            trace!("request success");
             return Ok((StatusCode::NO_CONTENT, ""));
         }
         Err(AppError::AuthError(AuthFailure::InvalidAuthToken { message: Some("Session token is missing".to_string()) }).into())
@@ -57,6 +66,33 @@ async fn route_request(
         Err(AppError::AuthError(AuthFailure::BadRequest { message: "expected server request got another request type".to_string() }).into())
     }
 
+}
+#[derive(Deserialize)]
+struct PollEventsQuery {
+    count: Option<usize>
+}
+#[axum::debug_handler]
+async fn route_poll_events(
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    query: Query<PollEventsQuery>
+) -> Result<Json<Vec<ServerEvent>>, ResponseError> {
+    if let Some(sess_token) = headers.get("authorization") {
+        let sess_token = sess_token.to_str()
+            .map_err(|_|AppError::BadRequest { message: Some("bad session token string".to_string()) })?
+            // strip out 'Bearer' from 'Bearer <token>'
+            .to_string()
+            .split(" ").skip(1).collect::<String>();
+        let manager = state.manager.clone();
+        let mut manager = manager.lock().await;
+        let server = manager.get_session_server(&sess_token)?;
+        let mut server = server.lock().await;
+
+        Ok(Json(server.pop_events(query.count.unwrap_or(5))))
+    } else {
+        Err(AppError::AuthError(AuthFailure::InvalidAuthToken { message: Some("Session token is missing".to_string()) }).into())
+    }
 }
 
 async fn route_socket(
@@ -75,7 +111,6 @@ async fn route_auth_server(
 ) -> Result<Json<WSResponse>, ResponseError> {
     let manager = state.manager.clone();
     let mut lock = manager.lock().await;
-    debug!("got auth request: {:?}", body);
     let (sess_token, expires_at) = lock.server_start_session(addr.ip(), body)?;;
     Ok(Json(WSResponse::SessionStarted { sess_token, expires_at }))
 }

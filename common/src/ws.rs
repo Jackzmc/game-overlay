@@ -4,6 +4,7 @@ use std::fmt;
 use serde::{Deserialize, Serialize};
 use crate::game::TeamConfig;
 use crate::requests::ServerRequest;
+use crate::events::ServerEvent;
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -64,7 +65,9 @@ pub enum WSResponse {
     /// A bad or malformed request was made
     InvalidRequest { message: Option<String> },
     /// Session was started successfully
-    SessionStarted { sess_token: String, expires_at: u64 }
+    SessionStarted { sess_token: String, expires_at: u64 },
+
+    ServerEvent(ServerEvent)
 }
 
 #[derive(Debug, Serialize, Deserialize)]

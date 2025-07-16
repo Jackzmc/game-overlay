@@ -1,5 +1,5 @@
 use std::collections::hash_map::Values;
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::net::{IpAddr, SocketAddr};
 use std::ops::{Add, Deref};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -21,7 +21,7 @@ use crate::{JWT_SECRET_KEY, POOL};
 use crate::web::websocket::WSMessage;
 
 pub struct ServerInstance {
-    event_queue: Vec<ServerEvent>,
+    event_queue: VecDeque<ServerEvent>,
     namespace: String,
     id: String,
     clients: HashMap<SteamID, Client>,
@@ -40,7 +40,7 @@ const ELEMENT_CACHE_TIME: u64 = 90;
 impl ServerInstance {
     pub fn new(addr: IpAddr, id: String, info: InitialServerInfo) -> Self {
         Self {
-            event_queue: vec![],
+            event_queue: VecDeque::new(),
             addr,
             namespace: "global".to_string(),
             id,
@@ -82,12 +82,18 @@ impl ServerInstance {
 
     /// Adds an event to the send queue
     pub fn send_event(&mut self, event: ServerEvent) {
-        self.event_queue.push(event)
+        self.event_queue.push_back(event)
     }
 
     /// Returns the number of events that have yet to be received
-    pub fn pending_events(&self) -> usize {
+    pub fn pending_events_count(&self) -> usize {
         self.event_queue.len()
+    }
+
+    /// Pops upto N amount of events
+    pub fn pop_events(&mut self, mut count: usize) -> Vec<ServerEvent> {
+        count = count.min(self.event_queue.len()); // prevent out of range
+        self.event_queue.drain(0..count).collect()
     }
 
     fn get_client(&self, steamid: SteamID) -> Option<Client> {
