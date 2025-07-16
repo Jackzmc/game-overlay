@@ -38,9 +38,24 @@ async fn route_request(
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
-    Json(body): Json<WSRequest>
-) -> impl IntoResponse {
-    let manager = state.manager.clone();
+    AppJson(body): AppJson<WSRequest>
+) -> Result<impl IntoResponse, ResponseError> {
+    // headers.get("authorization") // TODO: validate
+    if let WSRequest::Server(req) = body {
+        if let Some(sess_token) = headers.get("authorization") {
+            let sess_token = sess_token.to_str().map_err(|_|AppError::BadRequest { message: Some("bad session token string".to_string()) })?;
+            let manager = state.manager.clone();
+            let mut manager = manager.lock().await;
+            let server = manager.get_session_server(sess_token)?;
+
+            // let server = server.lock().await;
+            manager.on_server_request(&req, server).await?;
+            return Ok((StatusCode::NO_CONTENT, ""));
+        }
+        Err(AppError::AuthError(AuthFailure::InvalidAuthToken { message: Some("Session token is missing".to_string()) }).into())
+    } else {
+        Err(AppError::AuthError(AuthFailure::BadRequest { message: "expected server request got another request type".to_string() }).into())
+    }
 
 }
 
@@ -61,7 +76,7 @@ async fn route_auth_server(
     let manager = state.manager.clone();
     let mut lock = manager.lock().await;
     debug!("got auth request: {:?}", body);
-    let (sess_token, expires_at) = lock.server_start_session(addr.ip(), body).await?;;
+    let (sess_token, expires_at) = lock.server_start_session(addr.ip(), body)?;;
     Ok(Json(WSResponse::SessionStarted { sess_token, expires_at }))
 }
 

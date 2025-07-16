@@ -17,7 +17,7 @@ use tokio::sync::mpsc::UnboundedSender;
 use overlay_common::events::{ClientEvent, ServerEvent};
 use overlay_common::requests::{ClientRequest, ServerRequest};
 use overlay_common::{TargetSelection};
-use overlay_common::ws::{AuthFailure, AuthReq_Server, InitialServerInfo};
+use overlay_common::ws::{AppError, AuthFailure, AuthReq_Server, InitialServerInfo};
 use crate::client::{ClientInstance};
 use crate::{JWT_SECRET_KEY};
 use crate::server::{ServerInstance};
@@ -165,18 +165,8 @@ impl ManagerInstance {
 
     /// Starts a new server session, given an auth token
     /// Returns ( session token, expires at in unix sec )
-    pub async fn server_start_session(&mut self, addr: IpAddr, req: AuthReq_Server) -> Result<(String, u64), AuthFailure> {
-        let claims: ServerTokenClaims = req.auth_token.verify_with_key(JWT_SECRET_KEY.deref())
-            .map_err(|e| AuthFailure::InvalidAuthToken { message: Some(e.to_string()) })?;
-
-        let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
-        if claims.issued_at > now {
-            return Err(AuthFailure::InvalidAuthToken { message: Some("token issued in the future and is invalid".to_string()) })
-        }
-
-        // if claims.ip_addr != addr {
-        //     return Err(AuthFailure::IPMismatch { message: format!("IP address of request ({}) does not match token ({})", addr, claims.ip_addr) });
-        // }
+    pub fn server_start_session(&mut self, addr: IpAddr, req: AuthReq_Server) -> Result<(String, u64), AuthFailure> {
+        let claims = Self::validate_server_token(&req.auth_token, false)?;
 
         let server = ServerInstance::new(addr, claims.id.clone(), req.info);
         let (sess_token, expires_at) = server.session_token()
@@ -184,6 +174,34 @@ impl ManagerInstance {
         let server = Arc::new(Mutex::new(server));
         self.servers.insert(claims.id, server);
         Ok((sess_token, expires_at))
+    }
+
+    fn validate_server_token(token: &str, is_session: bool) -> Result<ServerTokenClaims, AuthFailure> {
+        let claims: ServerTokenClaims = token.verify_with_key(JWT_SECRET_KEY.deref())
+            .map_err(|e| AuthFailure::InvalidAuthToken { message: Some(e.to_string()) })?;
+
+        let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
+        if claims.issued_at > now {
+            return Err(AuthFailure::InvalidAuthToken { message: Some("token issued in the future and is invalid".to_string()) })
+        }
+
+        // TODO: temp disabled for testing
+        // if claims.ip_addr != addr {
+        //     return Err(AuthFailure::IPMismatch { message: format!("IP address of request ({}) does not match token ({})", addr, claims.ip_addr) });
+        // }
+
+        if is_session && let Some(expires) = claims.expires_at && expires <= now {
+            return Err(AuthFailure::InvalidAuthToken { message: Some("token has expired".to_string()) })
+        }
+        Ok(claims)
+    }
+
+    pub fn get_session_server(&self, sess_token: &str) -> Result<Server, AuthFailure> {
+        let claims = Self::validate_server_token(sess_token, true)?;
+
+        let server = self.get_server(&claims.id)
+            .ok_or(AuthFailure::InvalidAuthToken { message: Some("Server specified does not exist".to_string())})?;
+        Ok(server)
     }
 
     // pub async fn create_server(&mut self, id: String) -> Result<String, String> {
@@ -226,13 +244,14 @@ impl ManagerInstance {
         }
         Ok(())
     }
-    pub async fn on_server_request(&mut self, event: &ServerRequest, server: Server) -> Result<(), RequestError> {
+    pub async fn on_server_request(&mut self, event: &ServerRequest, server: Server) -> Result<(), AppError> {
         match event {
             ServerRequest::ServerInfo { hostname } => {
 
             },
             ServerRequest::PlayerJoined { steamid} => {
-                let steamid = SteamID::from_steam2(steamid).map_err(|_| RequestError::InvalidData)?;
+                let steamid = SteamID::from_steam2(steamid)
+                    .map_err(|_| AppError::BadRequest { message: Some("steamid is invalid".to_string())})?;
                 // If there is no client with that steamid, ignore it, they aren't using overlay
                 if let Some(client) = self.find_client_by_steamid(steamid) {
                     let mut server_inst = server.lock().await;
@@ -250,7 +269,8 @@ impl ManagerInstance {
                 }
             },
             ServerRequest::PlayerLeft { steamid} => {
-                let steamid = SteamID::from_steam2(steamid).map_err(|_| RequestError::InvalidData)?;
+                let steamid = SteamID::from_steam2(steamid)
+                    .map_err(|_| AppError::BadRequest { message: Some("steamid is invalid".to_string())})?;
                 // If there is no client with that steamid, ignore it, they aren't using overlay
                 if let Some(client) = self.find_client_by_steamid(steamid) {
                     let mut client = client.lock().await;

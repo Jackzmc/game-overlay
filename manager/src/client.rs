@@ -10,6 +10,7 @@ use tokio::sync::mpsc::UnboundedSender;
 use uuid::Uuid;
 use overlay_common::events::ClientEvent;
 use overlay_common::requests::ClientRequest;
+use overlay_common::ws::AppError;
 use crate::JWT_SECRET_KEY;
 use crate::manager::{RequestError, Server};
 use crate::web::websocket::WSMessage;
@@ -51,9 +52,11 @@ impl ClientInstance {
         self.steamid.is_some()
     }
 
-    pub fn send_event(&self, event: &ClientEvent) -> Result<(), RequestError> {
-        let json = serde_json::to_string(event).map_err(|_| RequestError::RequestNotSerializable)?;
-        self.tx.send(WSMessage(Message::Text(json.into()))).map_err(|_| ()).map_err(|_| RequestError::Disconnected)
+    pub fn send_event(&self, event: &ClientEvent) -> Result<(), AppError> {
+        let json = serde_json::to_string(event)
+            .map_err(|err| AppError::BadRequest { message: Some(err.to_string()) })?;
+        self.tx.send(WSMessage(Message::Text(json.into())))
+            .map_err(|e| AppError::SocketError { message: Some(e.to_string()) })
     }
 
     pub fn generate_auth_token(&self) -> Result<String, String> {

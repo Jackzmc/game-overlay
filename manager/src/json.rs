@@ -11,7 +11,7 @@ use axum::{
     RequestPartsExt,
 };
 use serde_json::{json, Value};
-
+use tracing::debug;
 
 /// Parses json and returns JSON error response instead of plain html
 pub struct AppJson<T>(pub T);

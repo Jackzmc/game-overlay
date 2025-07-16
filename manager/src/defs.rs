@@ -40,6 +40,7 @@ impl ResponseError {
             AppError::EntityNotFound { .. } => StatusCode::NOT_FOUND,
             AppError::MissingQueryParameter(_) => StatusCode::BAD_REQUEST,
             AppError::DatabaseError { .. } => StatusCode::INTERNAL_SERVER_ERROR,
+            AppError::SocketError { .. } => StatusCode::SERVICE_UNAVAILABLE
         }
     }
 }

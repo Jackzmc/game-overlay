@@ -1,3 +1,4 @@
+use std::sync::mpsc::SendError;
 use std::error::Error;
 use std::fmt;
 use serde::{Deserialize, Serialize};
@@ -70,6 +71,7 @@ pub enum WSResponse {
 #[serde(tag = "error", rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum AppError {
     AuthError(AuthFailure),
+    SocketError { message: Option<String> },
     BadRequest { message: Option<String> },
     InternalServerError { message: String },
     EntityNotFound { message: String },
