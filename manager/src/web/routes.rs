@@ -19,6 +19,7 @@ use overlay_common::ws::{AppError, AuthFailure, AuthReq_Server, WSRequest, WSRes
 use overlay_common::ws::AuthFailure::Timeout;
 use crate::{AppEngine, AppState};
 use crate::defs::ResponseError;
+use crate::json::AppJson;
 use crate::web::{OpenIdCallback};
 use crate::web::websocket::setup_conn;
 
@@ -43,7 +44,6 @@ async fn route_request(
 
 }
 
-
 async fn route_socket(
     ws: WebSocketUpgrade,
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
@@ -56,7 +56,7 @@ async fn route_socket(
 async fn route_auth_server(
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
     State(state): State<Arc<AppState>>,
-    Json(body): Json<AuthReq_Server>
+    AppJson(body): AppJson<AuthReq_Server>
 ) -> Result<Json<WSResponse>, ResponseError> {
     let manager = state.manager.clone();
     let mut lock = manager.lock().await;
@@ -69,7 +69,6 @@ async fn route_auth_server(
 struct SteamLogin {
     id: String
 }
-#[axum::debug_handler]
 async fn route_steam_login(
     query: Query<SteamLogin>,
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
@@ -81,7 +80,6 @@ async fn route_steam_login(
         Err(AppError::AuthError(Timeout).into())
     }
 }
-#[axum::debug_handler]
 async fn route_steam_callback(
     Query(mut query): Query<OpenIdCallback>,
     ConnectInfo(addr): ConnectInfo<SocketAddr>,

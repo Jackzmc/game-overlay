@@ -1,13 +1,22 @@
-use axum::{RequestPartsExt};
-use axum::extract::{FromRequest, MatchedPath, Request};
-use axum::extract::rejection::JsonRejection;
-use axum::http::StatusCode;
+//! Manual implementation of `FromRequest` that wraps another extractor
+//!
+//! + Powerful API: Implementing `FromRequest` grants access to `RequestParts`
+//!   and `async/await`. This means that you can create more powerful rejections
+//! - Boilerplate: Requires creating a new extractor for every custom rejection
+//! - Complexity: Manually implementing `FromRequest` results on more complex code
+use axum::{
+    extract::{rejection::JsonRejection, FromRequest, MatchedPath, Request},
+    http::StatusCode,
+    response::IntoResponse,
+    RequestPartsExt,
+};
 use serde_json::{json, Value};
 
-// We define our own `Json` extractor that customizes the error from `axum::Json`
-pub struct Json<T>(pub T);
 
-impl<S, T> FromRequest<S> for Json<T>
+/// Parses json and returns JSON error response instead of plain html
+pub struct AppJson<T>(pub T);
+
+impl<S, T> FromRequest<S> for AppJson<T>
 where
     axum::Json<T>: FromRequest<S, Rejection = JsonRejection>,
     S: Send + Sync,
@@ -16,17 +25,6 @@ where
 
     async fn from_request(req: Request, state: &S) -> Result<Self, Self::Rejection> {
         let (mut parts, body) = req.into_parts();
-
-        // We can use other extractors to provide better rejection messages.
-        // For example, here we are using `axum::extract::MatchedPath` to
-        // provide a better error message.
-        //
-        // Have to run that first since `Json` extraction consumes the request.
-        let path = parts
-            .extract::<MatchedPath>()
-            .await
-            .map(|path| path.as_str().to_owned())
-            .ok();
 
         let req = Request::from_parts(parts, body);
 
@@ -37,7 +35,6 @@ where
                 let payload = json!({
                     "message": rejection.body_text(),
                     "error": "INVALID_JSON",
-                    "path": path,
                 });
 
                 Err((rejection.status(), axum::Json(payload)))
