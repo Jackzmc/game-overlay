@@ -17,14 +17,14 @@ The server plugin is written in as a sourcemod plugin.
 
 [Client] <== websocket ==> [Manager] <== websocket ==> [Server]
 
-## Manager (src-manager)
+## Manager (in [manager](./manager))
  The manager sits in between the servers and clients and facilates communication. It authenticates & verifies incoming requests and transmits them as events to the server/client.
  For example, when a player joins a game, the server plugin informs the manager, which checks, and then informs the players. 
 
  * Requires a mysql connection
  * Requires steam API key
  
-## Client (src-overlay)
+## Client (in [client](./client))
  The client, or the overlay, is what runs on a user's computer. When it detects the game is running, it will appear and wait for the manager telling it instructions as events.
 
  * Uses egui for UI
