@@ -1,4 +1,4 @@
-use std::net::SocketAddr;
+use std::net::{IpAddr, SocketAddr};
 use std::time::SystemTime;
 use serde::{Deserialize, Serialize};
 
@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 /// The index of a player's team
 pub struct PlayerTeam(pub u8);
 #[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
+#[serde(rename_all = "snake_case")]
 /// Determine how team should be shown in UI
 pub enum TeamShow {
     /// Team is hidden in the UI
@@ -46,7 +47,7 @@ pub struct PlayerInfo {
 pub struct ServerInfo {
     pub id: String,
     pub name: String,
-    pub ip_addr: SocketAddr,
+    pub ip_addr: IpAddr,
     /// When client has been connected to server? or manager idk ill figure it out
     // pub connected_at: std::time::SystemTime,
     pub game_type: usize, // appid for now

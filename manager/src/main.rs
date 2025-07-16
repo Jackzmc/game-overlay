@@ -24,11 +24,10 @@ use sha2::digest::KeyInit;
 use sqlx::{MySqlPool};
 
 mod web;
+mod defs;
+mod json;
 
 static CLIENT_AUTH_TIMEOUT: Duration = Duration::from_secs(60 * 3);
-static LISTEN_ADDRESS: Lazy<SocketAddr> = Lazy::new(|| std::env::var("LISTEN_HOST").unwrap_or_else(|_| "127.0.0.1:3011".to_string())
-    .parse().expect("bad LISTEN_HOST"));
-static PUBLIC_URL: Lazy<String> = Lazy::new(|| std::env::var("PUBLIC_URL").unwrap_or_else(|_| "http://localhost:3011".to_string()) );
 static APP_USER_AGENT: &str = concat!(
     env!("CARGO_PKG_NAME"),
     "/",
@@ -47,12 +46,13 @@ struct AppState {
     manager: Manager,
     steam: SteamClient,
     http: reqwest::Client,
-    engine: Engine<Handlebars<'static>>
+    engine: Engine<Handlebars<'static>>,
+    public_url: String
 }
 
 impl AppState {
 
-    pub async fn new() -> Self {
+    pub async fn new(public_url: String) -> Self {
         let http_client = get_http_client();
         let steam = SteamClient::new(http_client.clone(), env::var("STEAM_APIKEY").expect("missing STEAM_APIKEY"));
         let manager = ManagerInstance::new(steam.clone());
@@ -65,6 +65,7 @@ impl AppState {
             steam,
             http: http_client,
             engine: Engine::from(hb),
+            public_url
         }
     }
 }
@@ -81,16 +82,29 @@ async fn main() {
     pretty_env_logger::init();
     setup_pool().await;
 
-    let state = AppState::new().await;
+
     let assets_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("static");
+    let listen_host = std::env::var("LISTEN_HOST").unwrap_or_else(|_| "127.0.0.1:3011".to_string());
 
-    let app = web::routes::get_router()
-        .with_state(Arc::new(state));
 
-    let listener = tokio::net::TcpListener::bind(*LISTEN_ADDRESS).await.unwrap();
-    info!("listening on {}", LISTEN_ADDRESS.to_string());
-    info!("public url: {}", PUBLIC_URL.deref());
-    axum::serve(listener, app.into_make_service_with_connect_info::<SocketAddr>()).await.unwrap();
+
+    match tokio::net::TcpListener::bind(&listen_host).await {
+        Ok(listener) => {
+            let public_url = env::var("PUBLIC_URL").unwrap_or_else(|_| format!("http://localhost:{}", listener.local_addr().unwrap().port()));
+            info!("listening on {}", listen_host);
+            info!("public url: {}", public_url);
+
+            let state = AppState::new(public_url).await;
+
+            let app = web::routes::get_router()
+                .with_state(Arc::new(state));
+            axum::serve(listener, app.into_make_service_with_connect_info::<SocketAddr>()).await.unwrap();
+        },
+        Err(e) => {
+            error!("FATAL: {}", e);
+            std::process::exit(1);
+        }
+    }
 }
 
 async fn setup_pool() {

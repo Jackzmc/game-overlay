@@ -13,13 +13,13 @@ use tokio::sync::mpsc::UnboundedSender;
 use overlay_common::requests::{ServerRequest};
 use overlay_common::ws::{AuthFailure, AuthRequest, WSResponse};
 use crate::manager::{Client, Manager, Server};
-use crate::{CLIENT_AUTH_TIMEOUT, PUBLIC_URL};
+use crate::{CLIENT_AUTH_TIMEOUT};
 use crate::web::AppError;
 
 
 
 /// Sets up a task and waits for the first message to be received
-pub async fn setup_conn(mut ws: WebSocket, addr: SocketAddr, manager: Manager) {
+pub async fn setup_conn(mut ws: WebSocket, addr: SocketAddr, manager: Manager, public_url: String) {
     debug!("setup_conn addr={:?}", addr);
     // let (mut conn_tx, mut conn_rx) = ws.split();
     // Wait for the first initial connection
@@ -28,7 +28,7 @@ pub async fn setup_conn(mut ws: WebSocket, addr: SocketAddr, manager: Manager) {
             trace!("incoming msg");
             match serde_json::from_str::<AuthRequest>(&message.into_text().unwrap()) {
                 Ok(json) => {
-                    login_connection(ws, manager, json, addr).await;
+                    login_connection(ws, manager, json, addr, public_url).await;
                 },
                 Err(err) => {
                     warn!("invalid payload: {}", err);
@@ -42,7 +42,7 @@ pub async fn setup_conn(mut ws: WebSocket, addr: SocketAddr, manager: Manager) {
 }
 
 /// Called with the auth payload, handles authenticating
-async fn login_connection(mut ws: WebSocket, manager: Manager, req: AuthRequest, addr: SocketAddr) {
+async fn login_connection(mut ws: WebSocket, manager: Manager, req: AuthRequest, addr: SocketAddr, public_url: String) {
     let (tx, rx) = mpsc::unbounded_channel::<WSMessage>();
     let mut rx = UnboundedReceiverStream::new(rx);
     let mut mngr = manager.lock().await;
@@ -60,7 +60,7 @@ async fn login_connection(mut ws: WebSocket, manager: Manager, req: AuthRequest,
                             return;
                         }
                     } else {
-                        send(&mut ws, WSResponse::PendingLogin { url: format!("{}/auth/login?id={id}", PUBLIC_URL.deref()) }).await;
+                        send(&mut ws, WSResponse::PendingLogin { url: format!("{}/auth/login?id={id}", public_url) }).await;
                     }
                     drop(mngr);
                     init_client_connection(ws, (tx, rx), manager, client).await;
@@ -70,23 +70,24 @@ async fn login_connection(mut ws: WebSocket, manager: Manager, req: AuthRequest,
                 }
             }
         }
-        AuthRequest::Server { auth_token, info} => {
+        AuthRequest::Server(req) => {
             debug!("login_connection - authorizing server");
-            match mngr.try_authorize_server(addr, tx.clone(), auth_token, info).await {
-                Ok(server) => {
-                    drop(mngr);
-                    {
-                        let server_inst = server.lock().await;
-                        server_inst.send_event(&ServerEvent::Authorized).unwrap();
-                    }
-                    debug!("server authorized");
-                    init_server_connection(ws, (tx, rx), manager, server).await;
-                },
-                Err(err) => {
-                    trace!("Server auth failed: {}", err);
-                    send_err(&mut ws, err).await;
-                }
-            }
+            send_err(&mut ws, AuthFailure::BadRequest { message: "endpoint not supported".to_string() }).await;
+            // match mngr.try_authorize_server(addr, tx.clone(), req.auth_token, req.info).await {
+            //     Ok(server) => {
+            //         drop(mngr);
+            //         {
+            //             let server_inst = server.lock().await;
+            //             server_inst.send_event(&ServerEvent::Authorized).unwrap();
+            //         }
+            //         debug!("server authorized");
+            //         init_server_connection(ws, (tx, rx), manager, server).await;
+            //     },
+            //     Err(err) => {
+            //         trace!("Server auth failed: {}", err);
+            //         send_err(&mut ws, err).await;
+            //     }
+            // }
         }
     }
     // Socket exiting
@@ -196,7 +197,7 @@ async fn init_server_connection(mut ws: WebSocket, (mut tx, mut rx): (UnboundedS
 async fn send(ws: &mut WebSocket, response: WSResponse) -> bool {
     match serde_json::to_string(&response) {
         Ok(json) => {
-            ws.send(Message::Text(json)).await.is_ok()
+            ws.send(Message::Text(json.into())).await.is_ok()
         },
         Err(e) => false
     }

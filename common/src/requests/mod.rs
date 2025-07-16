@@ -33,10 +33,6 @@ pub enum ServerRequest {
 
 
     */
-    InitialServerInfo {
-        hostname: String,
-        teams: Vec<TeamConfig>
-    },
     ServerInfo {
         hostname: Option<String>,
         // game: Option<GameInfo>

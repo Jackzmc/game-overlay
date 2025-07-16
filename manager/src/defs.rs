@@ -1,44 +1,37 @@
+use axum::extract::{FromRequest, MatchedPath, Request};
+use axum::extract::rejection::JsonRejection;
 use tokio_tungstenite::tungstenite::Message as TungsteniteMessage;
 use axum::extract::ws::Message as AxumMessage;
+use axum::http::{StatusCode};
+use axum::{Json, RequestPartsExt};
+use axum::response::IntoResponse;
 use serde::{Deserialize, Serialize};
-pub use overlay_common::AuthFailure;
-#[derive(Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-#[serde(tag = "type")]
-pub enum InitConnectionReqPayload {
-    Client { auth_token: Option<String> },
-    Server { auth_token: String }
+use serde_json::{json, Value};
+use overlay_common::ws::AuthFailure;
+
+pub struct ResponseError(pub AuthFailure);
+
+impl From<AuthFailure> for ResponseError {
+    fn from(err: AuthFailure) -> Self {
+        ResponseError(err)
+    }
 }
 
-#[derive(Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-#[serde(tag = "error")]
-pub enum InitConnectionResPayload {
-    PendingClientLogin { url: String },
-    ClientAuthorized,
-    ServerAuthorized,
-    InvalidPayload { message: Option<String> },
-    AuthError(AuthFailure)
+impl ResponseError {
+    fn status_code(&self) -> StatusCode {
+        match self.0 {
+            AuthFailure::Unknown => StatusCode::BAD_REQUEST,
+            AuthFailure::ObjectNotFound => StatusCode::NOT_FOUND,
+            AuthFailure::InvalidAuthToken { .. } => StatusCode::BAD_REQUEST,
+            AuthFailure::IPMismatch { .. } => StatusCode::UNAUTHORIZED,
+            AuthFailure::Timeout { .. } => StatusCode::REQUEST_TIMEOUT,
+            _ => StatusCode::INTERNAL_SERVER_ERROR,
+        }
+    }
+}
+impl IntoResponse for ResponseError {
+    fn into_response(self) -> axum::response::Response {
+        (self.status_code(), Json(self.0)).into_response()
+    }
 }
 
-
-impl Into<AxumMessage> for InitConnectionResPayload {
-    fn into(self) -> AxumMessage {
-        AxumMessage::Text(serde_json::to_string(&self).unwrap())
-    }
-}
-impl Into<AxumMessage> for InitConnectionReqPayload {
-    fn into(self) -> AxumMessage {
-        AxumMessage::Text(serde_json::to_string(&self).unwrap())
-    }
-}
-impl Into<TungsteniteMessage> for InitConnectionResPayload {
-    fn into(self) -> TungsteniteMessage {
-        TungsteniteMessage::text(serde_json::to_string(&self).unwrap())
-    }
-}
-impl Into<TungsteniteMessage> for InitConnectionReqPayload {
-    fn into(self) -> TungsteniteMessage {
-        TungsteniteMessage::text(serde_json::to_string(&self).unwrap())
-    }
-}

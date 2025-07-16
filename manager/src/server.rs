@@ -1,9 +1,11 @@
 use std::collections::hash_map::Values;
 use std::collections::HashMap;
-use std::net::SocketAddr;
-use std::time::SystemTime;
+use std::net::{IpAddr, SocketAddr};
+use std::ops::{Add, Deref};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use axum::extract::ws::Message;
 use handlebars::Template;
+use jwt::SignWithKey;
 use log::debug;
 use serde::{Deserialize, Serialize};
 use sqlx::{Executor, FromRow, MySqlPool, query};
@@ -15,15 +17,15 @@ use overlay_common::game::{ServerInfo, TeamConfig};
 use overlay_common::requests::{ClientRequest, ServerRequest};
 use overlay_common::ws::InitialServerInfo;
 use crate::manager::{Client, RequestError};
-use crate::POOL;
+use crate::{JWT_SECRET_KEY, POOL};
 use crate::web::websocket::WSMessage;
 
 pub struct ServerInstance {
-    tx: UnboundedSender<WSMessage>,
+    event_queue: Vec<ServerEvent>,
     namespace: String,
     id: String,
     clients: HashMap<SteamID, Client>,
-    addr: SocketAddr,
+    addr: IpAddr,
 
     name: String,
     game_type: u32,
@@ -36,20 +38,36 @@ pub struct ServerInstance {
 
 const ELEMENT_CACHE_TIME: u64 = 90;
 impl ServerInstance {
-    pub fn next_id() -> Uuid {
-        Uuid::new_v4()
-    }
-    pub fn with_id(addr: SocketAddr, tx: UnboundedSender<WSMessage>, namespace: String, id: String, info: InitialServerInfo) -> Self {
+    pub fn new(addr: IpAddr, id: String, info: InitialServerInfo) -> Self {
         Self {
+            event_queue: vec![],
             addr,
-            tx,
-            namespace,
+            namespace: "global".to_string(),
             id,
             clients: HashMap::new(),
             name: info.hostname,
             game_type: info.game_type,
             teams: info.teams,
         }
+    }
+
+    /// Generates a new session token, returning (token, expires at)
+    pub fn session_token(&self) -> Result<(String, u64), String> {
+        // expire it an hour from now
+        let expires_time = SystemTime::now().add(Duration::from_secs(60 * 60))
+            .duration_since(UNIX_EPOCH).unwrap().as_secs();
+        let claims = crate::manager::ServerTokenClaims {
+            id: self.id.to_string(),
+            issuer: "manager".to_string(),
+            issued_at: SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs(),
+            ip_addr: self.addr,
+            expires_at: Some(expires_time),
+        };
+        let token = claims.sign_with_key(JWT_SECRET_KEY.deref())
+            .map_err(|e| {
+            e.to_string()
+        })?;
+        Ok((token, expires_time))
     }
     pub fn namespace(&self) -> &str { &self.namespace }
     pub fn id(&self) -> &str { &self.id }
@@ -60,11 +78,16 @@ impl ServerInstance {
     pub fn client_ids(&self) -> Vec<SteamID> {
         self.clients.keys().map(|s| s.clone()).collect()
     }
-    pub fn addr(&self) -> String { self.addr.ip().to_string() }
+    pub fn addr(&self) -> String { self.addr.to_string() }
 
-    pub fn send_event(&self, event: &ServerEvent) -> Result<(), RequestError> {
-        let json = serde_json::to_string(event).map_err(|_| RequestError::RequestNotSerializable)?;
-        self.tx.send(WSMessage(Message::Text(json))).map_err(|_| ()).map_err(|_| RequestError::Disconnected)
+    /// Adds an event to the send queue
+    pub fn send_event(&mut self, event: ServerEvent) {
+        self.event_queue.push(event)
+    }
+
+    /// Returns the number of events that have yet to be received
+    pub fn pending_events(&self) -> usize {
+        self.event_queue.len()
     }
 
     fn get_client(&self, steamid: SteamID) -> Option<Client> {
@@ -91,7 +114,7 @@ impl ServerInstance {
         for client in self.clients() {
             let mut client = client.lock().await;
             client._set_server(None);
-            client.send_event(&ClientEvent::LeftServer).unwrap();
+            client.send_event(&ClientEvent::ChangedServer(None)).unwrap();
         }
     }
 

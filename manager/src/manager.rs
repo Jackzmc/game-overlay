@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::error::Error;
 use std::fmt;
-use std::net::SocketAddr;
+use std::net::{IpAddr, SocketAddr};
 use std::ops::Deref;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -17,7 +17,7 @@ use tokio::sync::mpsc::UnboundedSender;
 use overlay_common::events::{ClientEvent, ServerEvent};
 use overlay_common::requests::{ClientRequest, ServerRequest};
 use overlay_common::{TargetSelection};
-use overlay_common::ws::{AuthFailure, InitialServerInfo};
+use overlay_common::ws::{AuthFailure, AuthReq_Server, InitialServerInfo};
 use crate::client::{ClientInstance};
 use crate::{JWT_SECRET_KEY};
 use crate::server::{ServerInstance};
@@ -50,15 +50,17 @@ pub struct ClientTokenClaims {
 }
 #[derive(Serialize, Deserialize)]
 pub struct ServerTokenClaims {
-    pub namespace: String,
+    // pub namespace: String,
     #[serde(rename = "sub")]
-    pub subject: String,
+    pub id: String,
     #[serde(rename = "iss")]
     pub issuer: String,
     #[serde(rename = "iat")]
     pub issued_at: u64,
     #[serde(rename = "ip")]
-    pub ip_addr: Option<String>
+    pub ip_addr: IpAddr,
+    #[serde(rename = "exp")]
+    pub expires_at: Option<u64>
 }
 pub struct ManagerInstance {
     clients: HashMap<String, Client>,
@@ -113,11 +115,11 @@ impl ManagerInstance {
     pub async fn mark_client_authorized(&mut self, id: &str, steamid: SteamID) -> Result<(), AuthFailure> {
         debug!("mark_client_authorized: {} [{}]", id, steamid.steam2());
         let user = self.steam.get_user_details(steamid).await
-            .map_err(|e| AuthFailure::General { message: e.to_string() })?;
+            .map_err(|e| AuthFailure::InternalError { message: Some(e.to_string()) })?;
         let client = self.clients.get(id).ok_or_else(|| AuthFailure::ObjectNotFound)?;
         let mut client = client.lock().await;
         client._set_steamid(steamid);
-        let token = client.generate_auth_token().map_err(|e| AuthFailure::General { message: e })?;
+        let token = client.generate_auth_token().map_err(|e| AuthFailure::InternalError  { message: Some(e) })?;
         client.send_event(&ClientEvent::Authorized {
             steamid2: steamid.steam2(),
             auth_token: token,
@@ -161,18 +163,27 @@ impl ManagerInstance {
         self.client_steamid_map.get(&steamid).and_then(|id| self.get_client(id))
     }
 
-
-    pub async fn try_authorize_server(&mut self, addr: SocketAddr, tx: UnboundedSender<WSMessage>, auth_token: String, info: InitialServerInfo) -> Result<Server, AuthFailure> {
-        let claims: ServerTokenClaims = auth_token.verify_with_key(JWT_SECRET_KEY.deref())
+    /// Starts a new server session, given an auth token
+    /// Returns ( session token, expires at in unix sec )
+    pub async fn server_start_session(&mut self, addr: IpAddr, req: AuthReq_Server) -> Result<(String, u64), AuthFailure> {
+        let claims: ServerTokenClaims = req.auth_token.verify_with_key(JWT_SECRET_KEY.deref())
             .map_err(|e| AuthFailure::InvalidAuthToken { message: Some(e.to_string()) })?;
+
         let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
         if claims.issued_at > now {
             return Err(AuthFailure::InvalidAuthToken { message: Some("token issued in the future and is invalid".to_string()) })
         }
-        let server = ServerInstance::with_id(addr, tx, claims.namespace, claims.subject.clone(), info);
+
+        // if claims.ip_addr != addr {
+        //     return Err(AuthFailure::IPMismatch { message: format!("IP address of request ({}) does not match token ({})", addr, claims.ip_addr) });
+        // }
+
+        let server = ServerInstance::new(addr, claims.id.clone(), req.info);
+        let (sess_token, expires_at) = server.session_token()
+            .map_err(|e| AuthFailure::InternalError { message: Some(e) })?;
         let server = Arc::new(Mutex::new(server));
-        self.servers.insert(claims.subject, server.clone());
-        Ok(server)
+        self.servers.insert(claims.id, server);
+        Ok((sess_token, expires_at))
     }
 
     // pub async fn create_server(&mut self, id: String) -> Result<String, String> {
@@ -201,14 +212,14 @@ impl ManagerInstance {
             ClientRequest::Action { command, namespace, input, instance_id } => {
                 let client = client.lock().await;
                 if let Some(server) = client.connected_server() {
-                    let server = server.lock().await;
-                    server.send_event(&ServerEvent::Action {
+                    let mut server = server.lock().await;
+                    server.send_event(ServerEvent::Action {
                         steamid2: client.steamid2().unwrap(),
                         command: command.to_string(),
                         namespace: namespace.to_string(),
                         instance_id: instance_id.to_string(),
                         input: input.to_string()
-                    })?
+                    })
                 }
             },
             e => panic!("client event {:?} not supported", e)

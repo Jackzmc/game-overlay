@@ -80,3 +80,4 @@ pub enum TargetSelection {
     /// All players
     All
 }
+
