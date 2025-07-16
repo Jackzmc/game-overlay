@@ -11,13 +11,15 @@ use axum::routing::{get, post};
 use axum_template::RenderHtml;
 use jwt::Header;
 use log::__private_api::Value;
+use serde::Deserialize;
 use tracing::debug;
 use serde_json::json;
 use steamid_ng::SteamID;
-use overlay_common::ws::{AuthFailure, AuthReq_Server, WSRequest, WSResponse};
-use crate::{AppState};
+use overlay_common::ws::{AppError, AuthFailure, AuthReq_Server, WSRequest, WSResponse};
+use overlay_common::ws::AuthFailure::Timeout;
+use crate::{AppEngine, AppState};
 use crate::defs::ResponseError;
-use crate::web::{AppError, OpenIdCallback};
+use crate::web::{OpenIdCallback};
 use crate::web::websocket::setup_conn;
 
 pub(crate) fn get_router() -> Router<Arc<AppState>> {
@@ -27,7 +29,6 @@ pub(crate) fn get_router() -> Router<Arc<AppState>> {
         .route("/auth/server", post(route_auth_server))
         .route("/auth/login", get(route_steam_login))
         .route("/auth/callback", get(route_steam_callback))
-        .route("/manage", get(route_manage_ui))
 
        .route("/req", get(route_request))
 }
@@ -64,48 +65,45 @@ async fn route_auth_server(
     Ok(Json(WSResponse::SessionStarted { sess_token, expires_at }))
 }
 
+#[derive(Deserialize)]
+struct SteamLogin {
+    id: String
+}
+#[axum::debug_handler]
 async fn route_steam_login(
-    Query(query): Query<HashMap<String, String>>,
+    query: Query<SteamLogin>,
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
-    State(state): State<Arc<AppState>>
-) -> impl IntoResponse{
-    if let Some(id) = query.get("id") {
-        if state.manager.lock().await.verify_client(id, &addr).await {
-            // Ok(state.engine.render("login", ).map_err(|e| AppError::GenericServerError { message: e.to_string() })?)
-            Ok(RenderHtml("login", state.engine.clone(), json!({
-                "host": state.public_url.clone(),
-                "id": id
-            })))
-        } else {
-            Err(AppError::SessionExpired)
-        }
+    State(state): State<Arc<AppState>>,
+    // engine: AppEngine
+) -> Result<impl IntoResponse, ResponseError> {
+    if state.manager.lock().await.verify_client(&query.id, &addr).await {
+        // Ok(state.engine.render("login", ).map_err(|e| AppError::GenericServerError { message: e.to_string() })?)
+        // Ok(RenderHtml("login", engine, json!({
+        //     "host": state.public_url.clone(),
+        //     "id": query.id
+        // })))
+        Ok((StatusCode::OK, ""))
     } else {
-        Err(AppError::MissingQueryParameter("id".to_string()))
+        Err(AppError::AuthError(Timeout).into())
     }
 }
-
+#[axum::debug_handler]
 async fn route_steam_callback(
     Query(mut query): Query<OpenIdCallback>,
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
     State(state): State<Arc<AppState>>
-) -> Result<impl IntoResponse, AppError> {
+) -> Result<impl IntoResponse, ResponseError> {
     let (_,steamid2) = query.openid.identity.rsplit_once("/").unwrap();
     let steamid2: u64 = steamid2.parse().unwrap();
     let steamid = SteamID::from(steamid2);
     state.steam.verify_openid(&mut query.openid).await
-        .map_err(|e| AppError::GenericServerError { message: e.to_string() })?;
+        .map_err(|e| AppError::InternalServerError { message: e.to_string() })?;
     debug!("auth success, authorizing with manager");
     let mut manager = state.manager.lock().await;
     manager.mark_client_authorized(&query.id, steamid.clone()).await
-        .map_err(|e| AppError::GenericServerError { message: e.to_string() })?;
-    Ok(RenderHtml("login_success", state.engine.clone(), json!({})))
+        .map_err(|e| AppError::InternalServerError { message: e.to_string() })?;
+    // Ok(RenderHtml("login_success", state.engine.clone(), json!({})))
+    Ok((StatusCode::OK, ""))
+
 }
 
-
-async fn route_manage_ui(
-    State(state): State<Arc<AppState>>,
-) -> impl IntoResponse {
-    RenderHtml("manage", state.engine.clone(), json!({
-
-    }))
-}

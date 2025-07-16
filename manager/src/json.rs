@@ -1,4 +1,4 @@
-use axum::{async_trait, RequestPartsExt};
+use axum::{RequestPartsExt};
 use axum::extract::{FromRequest, MatchedPath, Request};
 use axum::extract::rejection::JsonRejection;
 use axum::http::StatusCode;
@@ -7,7 +7,6 @@ use serde_json::{json, Value};
 // We define our own `Json` extractor that customizes the error from `axum::Json`
 pub struct Json<T>(pub T);
 
-#[async_trait]
 impl<S, T> FromRequest<S> for Json<T>
 where
     axum::Json<T>: FromRequest<S, Rejection = JsonRejection>,

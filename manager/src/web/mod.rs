@@ -47,52 +47,6 @@ pub fn get_template_engine() -> Engine<Handlebars<'static>> {
     Engine::from(hb)
 }
 
-#[derive(Serialize)]
-#[serde(tag = "error", rename = "SCREAMING_SNAKE_CASE")]
-#[serde(rename_all = "snake_case")]
-enum AppError {
-    SessionExpired,
-    GenericServerError { message: String },
-    EntityNotFound { message: String },
-    MissingQueryParameter(String),
-    DatabaseError { message: String }
-}
-
-impl IntoResponse for AppError {
-    fn into_response(self) -> axum::response::Response {
-        let (status, message) = match self {
-            AppError::MissingQueryParameter(param) => {
-                (StatusCode::BAD_REQUEST, serde_json::to_string(&json!({
-                    "error": "MISSING_QUERY_PARAMETER",
-                    "param": &param,
-                    "message": format!("The parameter \"{param}\" is required").to_string()
-                })))
-            },
-            e @ AppError::EntityNotFound { .. } => {
-                (StatusCode::NOT_FOUND, serde_json::to_string(&e))
-            },
-            e @ AppError::GenericServerError { .. } => {
-                (StatusCode::INTERNAL_SERVER_ERROR, serde_json::to_string(&e))
-            },
-            e @ AppError::DatabaseError { .. } => {
-                (StatusCode::INTERNAL_SERVER_ERROR, serde_json::to_string(&e))
-            },
-            AppError::SessionExpired => {
-                (StatusCode::NOT_FOUND, serde_json::to_string(&json!({
-                    "error": "SESSION_EXPIRED",
-                    "message": "Session has expired or id is invalid"
-                })))
-            }
-        };
-
-        axum::response::Response::builder()
-            .status(status)
-            .header("content-type", "application/json")
-            .body(Body::from(message.expect("could not serialize error response")))
-            .unwrap()
-    }
-}
-
 #[derive(Serialize, Deserialize)]
 pub struct OpenIdCallback {
     id: String,

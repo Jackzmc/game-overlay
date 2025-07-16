@@ -40,13 +40,14 @@ static JWT_SECRET_KEY: Lazy<hmac::Hmac<sha2::Sha256>> = Lazy::new(|| {
 
 static POOL: OnceLock<MySqlPool> = OnceLock::new();
 
+pub type AppEngine = Engine<Handlebars<'static>>;
 struct ServeDir(PathBuf);
 #[derive(Clone)]
 struct AppState {
     manager: Manager,
     steam: SteamClient,
     http: reqwest::Client,
-    engine: Engine<Handlebars<'static>>,
+    engine: AppEngine,
     public_url: String
 }
 
@@ -97,7 +98,8 @@ async fn main() {
             let state = AppState::new(public_url).await;
 
             let app = web::routes::get_router()
-                .with_state(Arc::new(state));
+                .with_state(Arc::new(state))
+                .with_state(AppEngine::new(Handlebars::new()));
             axum::serve(listener, app.into_make_service_with_connect_info::<SocketAddr>()).await.unwrap();
         },
         Err(e) => {

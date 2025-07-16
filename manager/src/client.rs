@@ -53,7 +53,7 @@ impl ClientInstance {
 
     pub fn send_event(&self, event: &ClientEvent) -> Result<(), RequestError> {
         let json = serde_json::to_string(event).map_err(|_| RequestError::RequestNotSerializable)?;
-        self.tx.send(WSMessage(Message::Text(json))).map_err(|_| ()).map_err(|_| RequestError::Disconnected)
+        self.tx.send(WSMessage(Message::Text(json.into()))).map_err(|_| ()).map_err(|_| RequestError::Disconnected)
     }
 
     pub fn generate_auth_token(&self) -> Result<String, String> {

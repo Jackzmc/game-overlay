@@ -32,8 +32,7 @@ pub struct InitialServerInfo {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-#[serde(tag = "code")]
+#[serde(tag = "code", rename_all = "SCREAMING_SNAKE_CASE")]
 /// Represents an authentication error
 pub enum AuthFailure {
     InvalidAuthToken { message: Option<String> },
@@ -45,6 +44,7 @@ pub enum AuthFailure {
     ObjectNotFound
 }
 
+
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum WSRequest {
@@ -53,18 +53,28 @@ pub enum WSRequest {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-#[serde(tag = "type")]
+#[serde(tag = "type", rename_all = "snake_case")]
 /// Any response from manager (to either client OR server)
 pub enum WSResponse {
     /// An error occurred processing auth
-    Error { error: AuthFailure },
+    Error(AppError),
     /// Client has started an oauth2 login session
     PendingLogin { url: String },
     /// A bad or malformed request was made
     InvalidRequest { message: Option<String> },
     /// Session was started successfully
     SessionStarted { sess_token: String, expires_at: u64 }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(tag = "error", rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum AppError {
+    AuthError(AuthFailure),
+    BadRequest { message: Option<String> },
+    InternalServerError { message: String },
+    EntityNotFound { message: String },
+    MissingQueryParameter(String),
+    DatabaseError { message: String }
 }
 
 impl Error for AuthFailure {}

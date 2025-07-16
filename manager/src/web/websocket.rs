@@ -11,10 +11,9 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::UnboundedSender;
 use overlay_common::requests::{ServerRequest};
-use overlay_common::ws::{AuthFailure, AuthRequest, WSResponse};
+use overlay_common::ws::{AppError, AuthFailure, AuthRequest, WSResponse};
 use crate::manager::{Client, Manager, Server};
 use crate::{CLIENT_AUTH_TIMEOUT};
-use crate::web::AppError;
 
 
 
@@ -32,7 +31,7 @@ pub async fn setup_conn(mut ws: WebSocket, addr: SocketAddr, manager: Manager, p
                 },
                 Err(err) => {
                     warn!("invalid payload: {}", err);
-                    send_err(&mut ws, AuthFailure::InternalError { message: Some(err.to_string()) }).await;
+                    send_err(&mut ws, AppError::BadRequest { message: Some(err.to_string()) }).await;
                     ws.close().await.ok();
                 }
             }
@@ -55,7 +54,7 @@ async fn login_connection(mut ws: WebSocket, manager: Manager, req: AuthRequest,
                     if let Some(token) = auth_token {
                         if let Err(err) = mngr.authorize_client_token(&id, token).await {
                             // Cleanup ID
-                            send_err(&mut ws, AuthFailure::InternalError{ message: Some(err.to_string()) }).await;
+                            send_err(&mut ws, AppError::InternalServerError{ message: err.to_string() }).await;
                             mngr.remove_client(&id);
                             return;
                         }
@@ -66,13 +65,13 @@ async fn login_connection(mut ws: WebSocket, manager: Manager, req: AuthRequest,
                     init_client_connection(ws, (tx, rx), manager, client).await;
                 },
                 Err(err) => {
-                    send_err(&mut ws,err).await;
+                    send_auth_err(&mut ws, err).await;
                 }
             }
         }
         AuthRequest::Server(req) => {
             debug!("login_connection - authorizing server");
-            send_err(&mut ws, AuthFailure::BadRequest { message: "endpoint not supported".to_string() }).await;
+            send_err(&mut ws, AppError::BadRequest { message: Some("endpoint not supported".to_string()) }).await;
             // match mngr.try_authorize_server(addr, tx.clone(), req.auth_token, req.info).await {
             //     Ok(server) => {
             //         drop(mngr);
@@ -97,7 +96,7 @@ async fn init_client_connection(mut ws: WebSocket, (mut tx, mut rx): (UnboundedS
     trace!("entering client read loop");
     // Timeout if client doesn't authorize within CLIENT_AUTH_TIMEOUT
     if let Err(_) = tokio::time::timeout(CLIENT_AUTH_TIMEOUT, wait_for_client_auth(client.clone())).await {
-        send_err(&mut ws, AuthFailure::Timeout).await;
+        send_auth_err(&mut ws, AuthFailure::Timeout).await;
     } else {
         let (mut ws_tx, mut ws_rx) = ws.split();
         let client = client.clone();
@@ -139,7 +138,7 @@ async fn init_client_connection(mut ws: WebSocket, (mut tx, mut rx): (UnboundedS
 pub struct WSMessage(pub Message);
 impl Into<WSMessage> for WSResponse {
     fn into(self) -> WSMessage {
-        WSMessage(Message::Text(serde_json::to_string(&self).unwrap()))
+        WSMessage(Message::Text(serde_json::to_string(&self).unwrap().into()))
     }
 }
 
@@ -202,6 +201,9 @@ async fn send(ws: &mut WebSocket, response: WSResponse) -> bool {
         Err(e) => false
     }
 }
-async fn send_err(ws: &mut WebSocket, error: AuthFailure) -> bool {
-    send(ws, WSResponse::Error { error }).await
+async fn send_err(ws: &mut WebSocket, error: AppError) -> bool {
+    send(ws, WSResponse::Error(error)).await
+}
+async fn send_auth_err(ws: &mut WebSocket, error: AuthFailure) -> bool {
+    send(ws, WSResponse::Error(AppError::AuthError(error))).await
 }
